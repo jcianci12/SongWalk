@@ -19,6 +19,27 @@
     return `${minutes}:${String(remainder).padStart(2, "0")}`;
   }
 
+  function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0) {
+      return "0 B";
+    }
+
+    const units = ["B", "KB", "MB", "GB"];
+    let amount = bytes;
+    let unitIndex = 0;
+    while (amount >= 1024 && unitIndex < units.length - 1) {
+      amount /= 1024;
+      unitIndex += 1;
+    }
+
+    const precision = unitIndex === 0 ? 0 : 1;
+    return `${amount.toFixed(precision)} ${units[unitIndex]}`;
+  }
+
+  function nextFrame() {
+    return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+  }
+
   function escapeHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -126,9 +147,15 @@
 
   const uploadForm = document.querySelector("[data-upload-form]");
   const hiddenFileInput = document.querySelector("[data-hidden-file-input]");
+  const hiddenDirectoryInput = document.querySelector("[data-hidden-directory-input]");
   if (uploadForm && hiddenFileInput) {
     const dropzone = uploadForm.querySelector("[data-dropzone]");
     const statusLine = uploadForm.querySelector("[data-upload-status]");
+    const uploadProgress = uploadForm.querySelector("[data-upload-progress]");
+    const uploadProgressBar = uploadForm.querySelector("[data-upload-progress-bar]");
+    const uploadProgressCopy = uploadForm.querySelector("[data-upload-progress-copy]");
+    const windowDropOverlay = document.getElementById("window-drop-overlay");
+    let windowDragDepth = 0;
 
     function setUploadState(message, active) {
       if (statusLine) {
@@ -137,28 +164,164 @@
       uploadForm.classList.toggle("is-busy", Boolean(active));
     }
 
+    function setUploadProgress(loaded, total) {
+      if (!uploadProgress || !uploadProgressBar || !uploadProgressCopy) {
+        return;
+      }
+
+      const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100))) : 0;
+      uploadProgress.hidden = false;
+      uploadProgressBar.style.width = `${percent}%`;
+      uploadProgressCopy.textContent = total > 0
+        ? `${percent}% · ${formatBytes(loaded)} / ${formatBytes(total)}`
+        : `${percent}%`;
+    }
+
+    function resetUploadProgress() {
+      if (!uploadProgress || !uploadProgressBar || !uploadProgressCopy) {
+        return;
+      }
+
+      uploadProgress.hidden = true;
+      uploadProgressBar.style.width = "0%";
+      uploadProgressCopy.textContent = "0%";
+    }
+
+    function showWindowDropOverlay() {
+      if (!windowDropOverlay) {
+        return;
+      }
+
+      windowDropOverlay.hidden = false;
+      document.body.classList.add("is-window-drop-active");
+      windowDropOverlay.classList.add("is-active");
+      uploadForm.classList.add("is-drop-target");
+    }
+
+    function hideWindowDropOverlay() {
+      if (!windowDropOverlay) {
+        return;
+      }
+
+      windowDropOverlay.hidden = true;
+      document.body.classList.remove("is-window-drop-active");
+      windowDropOverlay.classList.remove("is-active");
+      uploadForm.classList.remove("is-drop-target");
+    }
+
+    function uploadFilesWithProgress(body) {
+      return new Promise((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", uploadForm.action);
+        request.responseType = "json";
+        request.setRequestHeader("Accept", "application/json");
+        request.setRequestHeader("X-Requested-With", "fetch");
+
+        request.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            setUploadProgress(event.loaded, event.total);
+          }
+        });
+
+        request.addEventListener("load", () => {
+          const payload = request.response || JSON.parse(request.responseText || "{}");
+          resolve({ ok: request.status >= 200 && request.status < 300, payload });
+        });
+        request.addEventListener("error", () => reject(new Error("Upload failed.")));
+        request.addEventListener("abort", () => reject(new Error("Upload canceled.")));
+        request.send(body);
+      });
+    }
+
+    function readDirectoryEntries(reader) {
+      return new Promise((resolve, reject) => {
+        reader.readEntries(resolve, reject);
+      });
+    }
+
+    function readFileEntry(entry) {
+      return new Promise((resolve) => {
+        entry.file(resolve, () => resolve(null));
+      });
+    }
+
+    async function flattenEntry(entry) {
+      if (!entry) {
+        return [];
+      }
+
+      if (entry.isFile) {
+        const file = await readFileEntry(entry);
+        return file ? [file] : [];
+      }
+
+      if (!entry.isDirectory) {
+        return [];
+      }
+
+      const reader = entry.createReader();
+      const files = [];
+      while (true) {
+        const entries = await readDirectoryEntries(reader);
+        if (!entries.length) {
+          break;
+        }
+
+        for (const childEntry of entries) {
+          files.push(...await flattenEntry(childEntry));
+        }
+      }
+      return files;
+    }
+
+    async function collectDroppedFiles(dataTransfer) {
+      if (dataTransfer && dataTransfer.items && dataTransfer.items.length) {
+        const entries = Array.from(dataTransfer.items)
+          .map((item) => {
+            if (typeof item.getAsEntry === "function") {
+              return item.getAsEntry();
+            }
+            if (typeof item.webkitGetAsEntry === "function") {
+              return item.webkitGetAsEntry();
+            }
+            return null;
+          })
+          .filter(Boolean);
+
+        if (entries.length) {
+          const nestedFiles = await Promise.all(entries.map((entry) => flattenEntry(entry)));
+          return nestedFiles.flat().filter(Boolean);
+        }
+      }
+
+      return Array.from((dataTransfer && dataTransfer.files) || []);
+    }
+
     async function sendFiles(fileList) {
       if (!fileList || !fileList.length) {
         return;
       }
 
+      const files = Array.from(fileList);
+      const totalBytes = files.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
       const body = new FormData();
-      Array.from(fileList).forEach((file) => body.append("tracks", file));
-      const busyMessage = `Uploading ${fileList.length} track${fileList.length === 1 ? "" : "s"}...`;
+      files.forEach((file) => body.append("tracks", file));
+      const busyMessage = `Uploading ${files.length} track${files.length === 1 ? "" : "s"}...`;
+      const startedAt = performance.now();
       setUploadState(busyMessage, true);
+      setUploadProgress(0, totalBytes || 1);
+      await nextFrame();
 
       try {
-        const { payload } = await withGlobalBusy(busyMessage, async () => {
-          const response = await fetch(uploadForm.action, {
-            method: "POST",
-            headers: { Accept: "application/json", "X-Requested-With": "fetch" },
-            body,
-          });
-          const payload = await response.json();
-          return { response, payload };
-        });
+        const { payload } = await uploadFilesWithProgress(body);
 
         if (payload.ok) {
+          setUploadProgress(totalBytes || 1, totalBytes || 1);
+          setUploadState("Upload complete. Refreshing library...", true);
+          const elapsed = performance.now() - startedAt;
+          if (elapsed < 450) {
+            await new Promise((resolve) => window.setTimeout(resolve, 450 - elapsed));
+          }
           window.location.reload();
           return;
         }
@@ -166,12 +329,24 @@
         setUploadState(payload.error || (payload.errors && payload.errors[0]) || "Upload failed.", false);
       } catch (error) {
         setUploadState(error instanceof Error ? error.message : "Upload failed.", false);
+      } finally {
+        windowDragDepth = 0;
+        hideWindowDropOverlay();
+        resetUploadProgress();
       }
     }
 
     hiddenFileInput.addEventListener("change", async () => {
       await sendFiles(hiddenFileInput.files);
+      hiddenFileInput.value = "";
     });
+
+    if (hiddenDirectoryInput) {
+      hiddenDirectoryInput.addEventListener("change", async () => {
+        await sendFiles(hiddenDirectoryInput.files);
+        hiddenDirectoryInput.value = "";
+      });
+    }
 
     ["dragenter", "dragover"].forEach((eventName) => {
       dropzone.addEventListener(eventName, (event) => {
@@ -188,8 +363,59 @@
     });
 
     dropzone.addEventListener("drop", async (event) => {
-      if (event.dataTransfer && event.dataTransfer.files.length) {
-        await sendFiles(event.dataTransfer.files);
+      event.stopPropagation();
+      const droppedFiles = await collectDroppedFiles(event.dataTransfer);
+      if (droppedFiles.length) {
+        await sendFiles(droppedFiles);
+      }
+    });
+
+    window.addEventListener("dragenter", (event) => {
+      if (!(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"))) {
+        return;
+      }
+
+      event.preventDefault();
+      windowDragDepth += 1;
+      showWindowDropOverlay();
+    });
+
+    window.addEventListener("dragover", (event) => {
+      if (!(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"))) {
+        return;
+      }
+
+      event.preventDefault();
+      showWindowDropOverlay();
+    });
+
+    window.addEventListener("dragleave", (event) => {
+      if (!(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"))) {
+        return;
+      }
+
+      event.preventDefault();
+      windowDragDepth = Math.max(0, windowDragDepth - 1);
+      if (windowDragDepth === 0 || event.target === document.documentElement) {
+        hideWindowDropOverlay();
+      }
+    });
+
+    window.addEventListener("drop", async (event) => {
+      if (!(event.dataTransfer && (event.dataTransfer.items?.length || event.dataTransfer.files?.length))) {
+        return;
+      }
+
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      event.preventDefault();
+      windowDragDepth = 0;
+      hideWindowDropOverlay();
+      const droppedFiles = await collectDroppedFiles(event.dataTransfer);
+      if (droppedFiles.length) {
+        await sendFiles(droppedFiles);
       }
     });
   }

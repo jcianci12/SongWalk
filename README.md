@@ -48,3 +48,28 @@ docker compose up --build
 ```
 
 The compose file mounts `./songshare-data` into the container at `/data`.
+
+## Temporary Public Access
+
+The container already listens on host port `8080`, so the fastest way to share it temporarily is to tunnel that port.
+
+Example with Cloudflare Tunnel:
+
+```powershell
+cloudflared tunnel --url http://localhost:8080
+```
+
+Example with ngrok:
+
+```powershell
+ngrok http 8080
+```
+
+Once you have a public HTTPS URL, restart the stack with that URL exported so Songshare generates correct share links:
+
+```powershell
+$env:SONGSHARE_BASE_URL="https://your-public-url-here"
+docker compose up -d
+```
+
+After that, browse Songshare through the public URL instead of `localhost`.

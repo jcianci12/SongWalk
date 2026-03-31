@@ -26,8 +26,12 @@
         </div>
         <div class="command-actions">
           <label class="frame-button">
-            Import tracks
+            Import files
             <input type="file" name="tracks" multiple accept=".aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,.wma,audio/*" data-hidden-file-input>
+          </label>
+          <label class="frame-button">
+            Import folder
+            <input type="file" name="tracks-folder" webkitdirectory directory multiple data-hidden-directory-input>
           </label>
         </div>
       </div>
@@ -83,10 +87,16 @@
             data-upload-form
           >
             <label class="upload-prompt" data-dropzone>
-              <span>Drop music into this library or click Import tracks.</span>
+              <span>Drop files or folders anywhere into this library, or use Import files / Import folder.</span>
               <small>{{ library_files_dir }}</small>
             </label>
             <p class="status-line" data-upload-status></p>
+            <div class="upload-progress" data-upload-progress>
+              <div class="upload-progress-track">
+                <div class="upload-progress-bar" data-upload-progress-bar></div>
+              </div>
+              <span class="upload-progress-copy" data-upload-progress-copy>0%</span>
+            </div>
           </form>
 
           {% if notice %}
@@ -250,6 +260,13 @@
 
     <div class="context-menu" id="track-context-menu" hidden>
       <button type="button" class="context-menu-item" id="context-find-album-info">Find album info</button>
+    </div>
+
+    <div class="window-drop-overlay" id="window-drop-overlay" hidden>
+      <div class="window-drop-card">
+        <p>Drop tracks anywhere to upload</p>
+        <small>{{ library_files_dir }}</small>
+      </div>
     </div>
 
     <dialog class="lookup-dialog" id="lookup-dialog">

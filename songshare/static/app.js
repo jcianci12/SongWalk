@@ -19,6 +19,80 @@
     return `${minutes}:${String(remainder).padStart(2, "0")}`;
   }
 
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function initialsFromText(value) {
+    return (value || "")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word[0].toUpperCase())
+      .join("") || "SS";
+  }
+
+  function setArtFrame(node, coverUrl, fallbackText) {
+    if (!node) {
+      return;
+    }
+
+    if (coverUrl) {
+      node.innerHTML = `<img src="${escapeHtml(coverUrl)}" alt="Album cover art">`;
+      return;
+    }
+
+    node.textContent = fallbackText || "SS";
+  }
+
+  const globalBusy = document.getElementById("global-busy");
+  const globalBusyText = document.getElementById("global-busy-text");
+  let busyDepth = 0;
+
+  function showGlobalBusy(message) {
+    if (!globalBusy) {
+      return () => {};
+    }
+
+    busyDepth += 1;
+    globalBusy.hidden = false;
+    document.body.classList.add("is-busy");
+    if (globalBusyText) {
+      globalBusyText.textContent = message || "Working...";
+    }
+
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+
+      released = true;
+      busyDepth = Math.max(0, busyDepth - 1);
+      if (busyDepth === 0) {
+        globalBusy.hidden = true;
+        document.body.classList.remove("is-busy");
+        if (globalBusyText) {
+          globalBusyText.textContent = "Working...";
+        }
+      }
+    };
+  }
+
+  async function withGlobalBusy(message, work) {
+    const release = showGlobalBusy(message);
+    try {
+      return await work();
+    } finally {
+      release();
+    }
+  }
+
   document.querySelectorAll("[data-copy]").forEach((button) => {
     button.addEventListener("click", async () => {
       const value = button.getAttribute("data-copy");
@@ -70,21 +144,29 @@
 
       const body = new FormData();
       Array.from(fileList).forEach((file) => body.append("tracks", file));
-      setUploadState(`Uploading ${fileList.length} track${fileList.length === 1 ? "" : "s"}...`, true);
+      const busyMessage = `Uploading ${fileList.length} track${fileList.length === 1 ? "" : "s"}...`;
+      setUploadState(busyMessage, true);
 
-      const response = await fetch(uploadForm.action, {
-        method: "POST",
-        headers: { Accept: "application/json", "X-Requested-With": "fetch" },
-        body,
-      });
+      try {
+        const { payload } = await withGlobalBusy(busyMessage, async () => {
+          const response = await fetch(uploadForm.action, {
+            method: "POST",
+            headers: { Accept: "application/json", "X-Requested-With": "fetch" },
+            body,
+          });
+          const payload = await response.json();
+          return { response, payload };
+        });
 
-      const payload = await response.json();
-      if (payload.ok) {
-        window.location.reload();
-        return;
+        if (payload.ok) {
+          window.location.reload();
+          return;
+        }
+
+        setUploadState(payload.error || (payload.errors && payload.errors[0]) || "Upload failed.", false);
+      } catch (error) {
+        setUploadState(error instanceof Error ? error.message : "Upload failed.", false);
       }
-
-      setUploadState(payload.error || (payload.errors && payload.errors[0]) || "Upload failed.", false);
     }
 
     hiddenFileInput.addEventListener("change", async () => {
@@ -113,16 +195,20 @@
   }
 
   const rows = Array.from(document.querySelectorAll("[data-track-row]"));
-  const albumSections = Array.from(document.querySelectorAll("[data-album-section]"));
+  const albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
   const player = document.getElementById("deck-player");
   const titleTarget = document.getElementById("now-playing-title");
   const metaTarget = document.getElementById("now-playing-meta");
   const artTarget = document.getElementById("selection-art");
   const editForm = document.querySelector("[data-editor-form]");
+  const editorAccordion = document.getElementById("editor-accordion");
+  const toggleEditorButton = document.getElementById("toggle-editor");
+  const ratingInput = document.getElementById("edit-rating");
   const titleInput = document.getElementById("edit-title");
   const artistInput = document.getElementById("edit-artist");
   const albumInput = document.getElementById("edit-album");
   const saveButton = document.getElementById("save-track");
+  const findAlbumInfoButton = document.getElementById("find-album-info");
   const deleteButton = document.getElementById("delete-track");
   const filterInput = document.querySelector("[data-track-filter]");
   const playButton = document.querySelector("[data-transport-play]");
@@ -132,19 +218,107 @@
   const volumeInput = document.querySelector("[data-transport-volume]");
   const currentTimeTarget = document.getElementById("current-time");
   const durationTarget = document.getElementById("duration-time");
+  const contextMenu = document.getElementById("track-context-menu");
+  const contextFindAlbumInfo = document.getElementById("context-find-album-info");
+  const lookupDialog = document.getElementById("lookup-dialog");
+  const lookupStatus = document.getElementById("lookup-status");
+  const lookupResults = document.getElementById("lookup-results");
+  const lookupTitleInput = document.getElementById("lookup-title");
+  const lookupArtistInput = document.getElementById("lookup-artist");
+  const lookupAlbumInput = document.getElementById("lookup-album");
+  const lookupSearchButton = document.getElementById("lookup-search-button");
+  const bulkDeleteUrl = deleteButton ? (deleteButton.getAttribute("data-bulk-delete-url") || "") : "";
 
   let selectedRow = null;
+  let selectedRows = [];
+  let longPressTimer = null;
 
   function visibleRows() {
     return rows.filter((row) => !row.hidden);
   }
 
+  function selectedTrackIds() {
+    return selectedRows.map((row) => row.getAttribute("data-track-id")).filter(Boolean);
+  }
+
+  function isMultiSelectEvent(event) {
+    return Boolean(event && (event.ctrlKey || event.metaKey));
+  }
+
+  function normalizeRating(value) {
+    const numeric = Number.parseInt(value, 10);
+    if (!Number.isFinite(numeric)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(5, numeric));
+  }
+
+  function setInlineRatingState(row, ratingValue) {
+    const rating = normalizeRating(ratingValue);
+    row.setAttribute("data-track-rating", String(rating));
+    row.querySelectorAll("[data-inline-rating-value]").forEach((button) => {
+      const starValue = normalizeRating(button.getAttribute("data-inline-rating-value"));
+      button.innerHTML = starValue <= rating ? "&#9733;" : "&#9734;";
+      button.classList.toggle("is-active", starValue <= rating);
+    });
+  }
+
+  async function saveInlineRating(row, ratingValue) {
+    const rating = normalizeRating(ratingValue);
+    const ratingUrl = row.getAttribute("data-track-rating-url");
+    if (!ratingUrl) {
+      return;
+    }
+
+    const previousRating = normalizeRating(row.getAttribute("data-track-rating"));
+    setInlineRatingState(row, rating);
+
+    try {
+      const { response, payload } = await withGlobalBusy("Saving rating...", async () => {
+        const response = await fetch(ratingUrl, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "X-Requested-With": "fetch",
+          },
+          body: JSON.stringify({ rating }),
+        });
+        const payload = await response.json();
+        return { response, payload };
+      });
+
+      if (!response.ok || !payload.ok) {
+        throw new Error((payload && payload.error) || "Could not save rating.");
+      }
+
+      setInlineRatingState(row, payload.track && payload.track.rating);
+
+      if (selectedRow === row) {
+        renderSelection(false);
+      }
+    } catch (error) {
+      setInlineRatingState(row, previousRating);
+      throw error;
+    }
+  }
+
   function setEditorEnabled(enabled) {
-    [titleInput, artistInput, albumInput, saveButton, deleteButton].forEach((element) => {
+    [titleInput, artistInput, albumInput, ratingInput, saveButton, findAlbumInfoButton, deleteButton, toggleEditorButton].forEach((element) => {
       if (element) {
         element.disabled = !enabled;
       }
     });
+  }
+
+  function setEditorAccordionOpen(open) {
+    if (!editorAccordion || !toggleEditorButton) {
+      return;
+    }
+
+    const isOpen = Boolean(open);
+    editorAccordion.classList.toggle("is-open", isOpen);
+    toggleEditorButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
   }
 
   function updatePlayButton() {
@@ -155,38 +329,97 @@
     playButton.innerHTML = player.paused ? "&#9654;" : "&#10074;&#10074;";
   }
 
-  function selectRow(row, autoplay) {
-    if (!row) {
-      return;
+  function hideContextMenu() {
+    if (contextMenu) {
+      contextMenu.hidden = true;
     }
+  }
 
-    if (selectedRow) {
-      selectedRow.classList.remove("is-selected");
+  function currentLookupQuery() {
+    return {
+      title: lookupTitleInput ? lookupTitleInput.value.trim() : "",
+      artist: lookupArtistInput ? lookupArtistInput.value.trim() : "",
+      album: lookupAlbumInput ? lookupAlbumInput.value.trim() : "",
+    };
+  }
+
+  function countLookupFields(query) {
+    return [query.title, query.artist, query.album].filter(Boolean).length;
+  }
+
+  function updateRowSelectionState() {
+    rows.forEach((row) => {
+      const isSelected = selectedRows.includes(row);
+      row.classList.toggle("is-selected", isSelected);
+      row.classList.toggle("is-primary-selected", row === selectedRow);
+    });
+  }
+
+  function renderMultiSelection() {
+    titleTarget.textContent = `${selectedRows.length} tracks selected`;
+    metaTarget.textContent = "Ctrl/Cmd click adds or removes tracks. Delete removes the whole selection.";
+    setArtFrame(artTarget, "", String(selectedRows.length));
+    setEditorAccordionOpen(false);
+
+    if (titleInput) {
+      titleInput.value = "";
+      titleInput.disabled = true;
     }
+    if (artistInput) {
+      artistInput.value = "";
+      artistInput.disabled = true;
+    }
+    if (albumInput) {
+      albumInput.value = "";
+      albumInput.disabled = true;
+    }
+    if (ratingInput) {
+      ratingInput.value = "0";
+    }
+    if (editForm) {
+      editForm.action = "";
+    }
+    if (saveButton) {
+      saveButton.disabled = true;
+    }
+    if (toggleEditorButton) {
+      toggleEditorButton.disabled = true;
+    }
+    if (findAlbumInfoButton) {
+      findAlbumInfoButton.disabled = true;
+      findAlbumInfoButton.setAttribute("data-lookup-url", "");
+      findAlbumInfoButton.setAttribute("data-lookup-apply-url", "");
+    }
+    if (deleteButton) {
+      deleteButton.disabled = false;
+      deleteButton.setAttribute("data-delete-url", "");
+      deleteButton.textContent = `Delete ${selectedRows.length} tracks`;
+    }
+  }
 
-    selectedRow = row;
-    selectedRow.classList.add("is-selected");
-
+  function renderSingleSelection(row, autoplay) {
     const title = row.getAttribute("data-track-title") || row.getAttribute("data-track-filename") || "Selected track";
     const artist = row.getAttribute("data-track-artist") || "Unknown artist";
     const album = row.getAttribute("data-track-album") || "Unknown album";
     const filename = row.getAttribute("data-track-filename") || "";
-    const initials = (album || title)
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((word) => word[0].toUpperCase())
-      .join("") || "SS";
+    const coverUrl = row.getAttribute("data-track-cover-url") || "";
+    const coverInitials = row.getAttribute("data-track-cover-initials") || initialsFromText(album || title);
 
     titleTarget.textContent = title;
     metaTarget.textContent = `${artist} - ${album} - ${filename}`;
-    artTarget.textContent = initials;
+    setArtFrame(artTarget, coverUrl, coverInitials);
 
     titleInput.value = title;
     artistInput.value = artist === "Unknown artist" ? "" : artist;
     albumInput.value = album === "Unknown album" ? "" : album;
+    if (ratingInput) {
+      ratingInput.value = row.getAttribute("data-track-rating") || "0";
+    }
     editForm.action = row.getAttribute("data-track-update-url") || "";
     deleteButton.setAttribute("data-delete-url", row.getAttribute("data-track-delete-url") || "");
+    deleteButton.textContent = "Delete";
+    findAlbumInfoButton.setAttribute("data-lookup-url", row.getAttribute("data-track-lookup-url") || "");
+    findAlbumInfoButton.setAttribute("data-lookup-apply-url", row.getAttribute("data-track-lookup-apply-url") || "");
     setEditorEnabled(true);
 
     if (player) {
@@ -206,20 +439,386 @@
     updatePlayButton();
   }
 
+  function renderSelection(autoplay) {
+    updateRowSelectionState();
+
+    if (!selectedRows.length) {
+      if (titleTarget) {
+        titleTarget.textContent = "Select a track";
+      }
+      if (metaTarget) {
+        metaTarget.textContent = "Choose a row to edit metadata or play it from the transport bar.";
+      }
+      setArtFrame(artTarget, "", "SS");
+      if (ratingInput) {
+        ratingInput.value = "0";
+      }
+      setEditorAccordionOpen(false);
+      if (deleteButton) {
+        deleteButton.textContent = "Delete";
+      }
+      setEditorEnabled(false);
+      updatePlayButton();
+      return;
+    }
+
+    if (!selectedRow || !selectedRows.includes(selectedRow)) {
+      selectedRow = selectedRows[selectedRows.length - 1];
+    }
+
+    if (selectedRows.length > 1) {
+      renderMultiSelection();
+      return;
+    }
+
+    renderSingleSelection(selectedRow, autoplay);
+  }
+
+  function openContextMenu(event, row) {
+    if (!contextMenu) {
+      return;
+    }
+
+    if (!selectedRows.includes(row)) {
+      setEditorAccordionOpen(false);
+      selectedRows = [row];
+      selectedRow = row;
+      renderSelection(false);
+    }
+    contextMenu.hidden = false;
+    contextMenu.style.left = `${event.clientX}px`;
+    contextMenu.style.top = `${event.clientY}px`;
+  }
+
+  function selectRow(row, autoplay) {
+    if (!row) {
+      return;
+    }
+
+    setEditorAccordionOpen(false);
+    selectedRow = row;
+    selectedRows = [row];
+    renderSelection(autoplay);
+  }
+
+  function toggleRowSelection(row) {
+    if (!row) {
+      return;
+    }
+
+    if (selectedRows.includes(row)) {
+      if (selectedRows.length === 1) {
+        selectedRows = [];
+        selectedRow = null;
+        setEditorAccordionOpen(false);
+        renderSelection(false);
+        return;
+      }
+
+      selectedRows = selectedRows.filter((item) => item !== row);
+      if (selectedRow === row) {
+        selectedRow = selectedRows[selectedRows.length - 1] || null;
+      }
+      setEditorAccordionOpen(false);
+      renderSelection(false);
+      return;
+    }
+
+    selectedRows = [...selectedRows, row];
+    selectedRow = row;
+    setEditorAccordionOpen(false);
+    renderSelection(false);
+  }
+
+  async function runLookupSearch() {
+    if (!selectedRow || !lookupDialog || !lookupResults || !lookupStatus) {
+      return;
+    }
+
+    const lookupUrl = selectedRow.getAttribute("data-track-lookup-url");
+    const applyUrl = selectedRow.getAttribute("data-track-lookup-apply-url");
+    if (!lookupUrl || !applyUrl) {
+      return;
+    }
+
+    lookupResults.innerHTML = "";
+    const query = currentLookupQuery();
+    if (countLookupFields(query) < 2) {
+      lookupStatus.textContent = "Enter at least two fields. Use title + artist, artist + album, or title + album.";
+      return;
+    }
+
+    lookupStatus.textContent = "Searching MusicBrainz...";
+    if (lookupSearchButton) {
+      lookupSearchButton.disabled = true;
+    }
+
+    try {
+      const params = new URLSearchParams(query);
+      const { response, payload } = await withGlobalBusy("Searching MusicBrainz...", async () => {
+        const response = await fetch(`${lookupUrl}?${params.toString()}`, {
+          headers: { Accept: "application/json", "X-Requested-With": "fetch" },
+        });
+        const payload = await response.json();
+        return { response, payload };
+      });
+
+      if (!response.ok || !payload.ok) {
+        lookupStatus.textContent = payload.error || "Lookup failed.";
+        return;
+      }
+
+      if (lookupTitleInput) {
+        lookupTitleInput.value = payload.query.title || "";
+      }
+      if (lookupArtistInput) {
+        lookupArtistInput.value = payload.query.artist || "";
+      }
+      if (lookupAlbumInput) {
+        lookupAlbumInput.value = payload.query.album || "";
+      }
+
+      if (!payload.candidates.length) {
+        lookupStatus.textContent = "No candidate releases found. Try changing the title, artist, or album and search again.";
+        return;
+      }
+
+      lookupStatus.textContent = "Choose the closest match to apply album artwork and metadata.";
+      lookupResults.innerHTML = payload.candidates
+        .map((candidate, index) => {
+          const cover = candidate.cover_art_url
+            ? `<img src="${escapeHtml(candidate.cover_art_url)}" alt="${escapeHtml(candidate.title)} cover art">`
+            : escapeHtml(initialsFromText(candidate.title));
+
+          return `
+            <article class="lookup-result">
+              <div class="lookup-result-art">${cover}</div>
+              <div class="lookup-result-copy">
+                <p class="lookup-result-title">${escapeHtml(candidate.title)}</p>
+                <p>${escapeHtml(candidate.artist)}</p>
+                <p>${escapeHtml(candidate.track_title || "")}</p>
+                <p>${escapeHtml([candidate.date, candidate.country].filter(Boolean).join(" - "))}</p>
+              </div>
+              <button
+                type="button"
+                class="frame-button primary"
+                data-apply-candidate="${index}"
+              >
+                Apply
+              </button>
+            </article>
+          `;
+        })
+        .join("");
+
+      lookupResults.querySelectorAll("[data-apply-candidate]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const candidate = payload.candidates[Number(button.getAttribute("data-apply-candidate"))];
+          if (!candidate) {
+            return;
+          }
+
+          lookupStatus.textContent = "Applying album info...";
+
+          try {
+            const { response: applyResponse, payload: applyPayload } = await withGlobalBusy(
+              "Applying album info...",
+              async () => {
+                const response = await fetch(applyUrl, {
+                  method: "POST",
+                  headers: {
+                    Accept: "application/json",
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "fetch",
+                  },
+                  body: JSON.stringify({
+                    release_id: candidate.release_id,
+                    release_group_id: candidate.release_group_id,
+                    title: candidate.track_title || selectedRow.getAttribute("data-track-title") || "",
+                    artist: candidate.artist || selectedRow.getAttribute("data-track-artist") || "",
+                    album: candidate.title || selectedRow.getAttribute("data-track-album") || "",
+                  }),
+                });
+                const payload = await response.json();
+                return { response, payload };
+              },
+            );
+
+            if (!applyResponse.ok || !applyPayload.ok) {
+              lookupStatus.textContent = applyPayload.error || "Could not apply album info.";
+              return;
+            }
+
+            window.location.reload();
+          } catch (error) {
+            lookupStatus.textContent = error instanceof Error ? error.message : "Could not apply album info.";
+          }
+        });
+      });
+    } catch (error) {
+      lookupStatus.textContent = error instanceof Error ? error.message : "Lookup failed.";
+    } finally {
+      if (lookupSearchButton) {
+        lookupSearchButton.disabled = false;
+      }
+    }
+  }
+
+  async function openLookupDialog() {
+    if (!selectedRow || !lookupDialog) {
+      return;
+    }
+
+    if (lookupTitleInput) {
+      lookupTitleInput.value = selectedRow.getAttribute("data-track-title") || "";
+    }
+    if (lookupArtistInput) {
+      const artist = selectedRow.getAttribute("data-track-artist") || "";
+      lookupArtistInput.value = artist === "Unknown artist" ? "" : artist;
+    }
+    if (lookupAlbumInput) {
+      const album = selectedRow.getAttribute("data-track-album") || "";
+      lookupAlbumInput.value = album === "Unknown album" ? "" : album;
+    }
+
+    if (!lookupDialog.open) {
+      lookupDialog.showModal();
+    }
+
+    await runLookupSearch();
+  }
+
   if (rows.length) {
     rows.forEach((row) => {
-      row.addEventListener("click", () => {
+      row.addEventListener("click", (event) => {
+        if (isMultiSelectEvent(event)) {
+          toggleRowSelection(row);
+          return;
+        }
+
         selectRow(row, false);
+      });
+
+      row.addEventListener("keydown", (event) => {
+        if (event.target !== row) {
+          return;
+        }
+
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectRow(row, false);
+        }
       });
 
       row.addEventListener("dblclick", () => {
         selectRow(row, true);
+      });
+
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openContextMenu(event, row);
+      });
+
+      row.addEventListener("touchstart", (event) => {
+        if (event.touches.length !== 1) {
+          return;
+        }
+
+        const touch = event.touches[0];
+        longPressTimer = window.setTimeout(() => {
+          openContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, row);
+        }, 450);
+      }, { passive: true });
+
+      ["touchend", "touchcancel", "touchmove"].forEach((eventName) => {
+        row.addEventListener(eventName, () => {
+          if (longPressTimer) {
+            window.clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+        }, { passive: true });
+      });
+
+      row.querySelectorAll("[data-inline-rating-value]").forEach((button) => {
+        button.addEventListener("click", async (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          selectRow(row, false);
+
+          try {
+            await saveInlineRating(row, button.getAttribute("data-inline-rating-value"));
+          } catch (error) {
+            window.alert(error instanceof Error ? error.message : "Could not save rating.");
+          }
+        });
       });
     });
 
     selectRow(rows[0], false);
   } else {
     setEditorEnabled(false);
+  }
+
+  document.addEventListener("click", (event) => {
+    if (contextMenu && !contextMenu.hidden && !contextMenu.contains(event.target)) {
+      hideContextMenu();
+    }
+  });
+
+  window.addEventListener("resize", hideContextMenu);
+  window.addEventListener("scroll", hideContextMenu, true);
+
+  if (contextFindAlbumInfo) {
+    contextFindAlbumInfo.addEventListener("click", async () => {
+      hideContextMenu();
+      await openLookupDialog();
+    });
+  }
+
+  if (findAlbumInfoButton) {
+    findAlbumInfoButton.addEventListener("click", openLookupDialog);
+  }
+
+  if (lookupSearchButton) {
+    lookupSearchButton.addEventListener("click", runLookupSearch);
+  }
+
+  [lookupTitleInput, lookupArtistInput, lookupAlbumInput]
+    .filter(Boolean)
+    .forEach((input) => {
+      input.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter") {
+          return;
+        }
+
+        event.preventDefault();
+        await runLookupSearch();
+      });
+    });
+
+  if (toggleEditorButton) {
+    toggleEditorButton.addEventListener("click", () => {
+      if (toggleEditorButton.disabled) {
+        return;
+      }
+
+      const isOpen = toggleEditorButton.getAttribute("aria-expanded") === "true";
+      setEditorAccordionOpen(!isOpen);
+    });
+  }
+
+  if (lookupDialog) {
+    lookupDialog.addEventListener("click", (event) => {
+      const rect = lookupDialog.getBoundingClientRect();
+      const outside =
+        event.clientX < rect.left ||
+        event.clientX > rect.right ||
+        event.clientY < rect.top ||
+        event.clientY > rect.bottom;
+      if (outside) {
+        lookupDialog.close();
+      }
+    });
   }
 
   if (filterInput && rows.length) {
@@ -231,9 +830,9 @@
         row.hidden = Boolean(query) && !haystack.includes(query);
       });
 
-      albumSections.forEach((section) => {
-        const hasVisibleRows = Array.from(section.querySelectorAll("[data-track-row]")).some((row) => !row.hidden);
-        section.hidden = !hasVisibleRows;
+      albumContainers.forEach((container) => {
+        const hasVisibleRows = Array.from(container.querySelectorAll("[data-track-row]")).some((row) => !row.hidden);
+        container.hidden = !hasVisibleRows;
       });
     });
   }
@@ -245,34 +844,66 @@
         return;
       }
 
-      const response = await fetch(editForm.action, {
-        method: "POST",
-        headers: { Accept: "application/json", "X-Requested-With": "fetch" },
-        body: new FormData(editForm),
-      });
+      saveButton.disabled = true;
+      try {
+        const response = await withGlobalBusy("Saving track...", async () => {
+          return await fetch(editForm.action, {
+            method: "POST",
+            headers: { Accept: "application/json", "X-Requested-With": "fetch" },
+            body: new FormData(editForm),
+          });
+        });
 
-      if (!response.ok) {
-        return;
+        if (!response.ok) {
+          return;
+        }
+
+        window.location.reload();
+      } finally {
+        saveButton.disabled = false;
       }
-
-      window.location.reload();
     });
   }
 
   if (deleteButton) {
     deleteButton.addEventListener("click", async () => {
-      const url = deleteButton.getAttribute("data-delete-url");
-      if (!url || !window.confirm("Delete this track from the shared library?")) {
+      const trackIds = selectedTrackIds();
+      const isBulkDelete = trackIds.length > 1;
+      const url = isBulkDelete ? bulkDeleteUrl : deleteButton.getAttribute("data-delete-url");
+      const message = isBulkDelete
+        ? `Delete ${trackIds.length} tracks from the shared library?`
+        : "Delete this track from the shared library?";
+
+      if (!url || !trackIds.length || !window.confirm(message)) {
         return;
       }
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { Accept: "application/json", "X-Requested-With": "fetch" },
-      });
+      deleteButton.disabled = true;
+      try {
+        const response = await withGlobalBusy(isBulkDelete ? "Deleting tracks..." : "Deleting track...", async () => {
+          if (isBulkDelete) {
+            return await fetch(url, {
+              method: "POST",
+              headers: {
+                Accept: "application/json",
+                "Content-Type": "application/json",
+                "X-Requested-With": "fetch",
+              },
+              body: JSON.stringify({ track_ids: trackIds }),
+            });
+          }
 
-      if (response.ok) {
-        window.location.reload();
+          return await fetch(url, {
+            method: "POST",
+            headers: { Accept: "application/json", "X-Requested-With": "fetch" },
+          });
+        });
+
+        if (response.ok) {
+          window.location.reload();
+        }
+      } finally {
+        deleteButton.disabled = false;
       }
     });
   }

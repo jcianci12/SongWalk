@@ -1,0 +1,7 @@
+<div{% if art_id %} id="{{ art_id }}"{% endif %} class="{{ art_classes }}">
+  {% if art_cover_url %}
+    <img src="{{ art_cover_url }}" alt="{{ art_alt_text }}">
+  {% else %}
+    {{ art_fallback_text }}
+  {% endif %}
+</div>

@@ -12,6 +12,8 @@ from typing import BinaryIO
 
 from werkzeug.utils import secure_filename
 
+from .audio_tags import clamp_rating, read_mp3_metadata, write_mp3_metadata
+
 
 ALLOWED_AUDIO_EXTENSIONS = {
     ".aac",
@@ -53,6 +55,7 @@ class Track:
     title: str = ""
     artist: str = ""
     album: str = ""
+    rating: int = 0
     cover_art_name: str = ""
     musicbrainz_release_id: str = ""
     musicbrainz_release_group_id: str = ""
@@ -70,6 +73,7 @@ class Track:
             title=payload.get("title", ""),
             artist=payload.get("artist", ""),
             album=payload.get("album", ""),
+            rating=payload.get("rating", 0),
             cover_art_name=payload.get("cover_art_name", ""),
             musicbrainz_release_id=payload.get("musicbrainz_release_id", ""),
             musicbrainz_release_group_id=payload.get("musicbrainz_release_group_id", ""),
@@ -178,6 +182,7 @@ class Store:
                 or mimetypes.guess_type(filename)[0]
                 or "application/octet-stream"
             )
+            embedded_metadata = read_mp3_metadata(target_path)
 
             now = _now()
             track = Track(
@@ -188,20 +193,57 @@ class Store:
                 size=size,
                 uploaded_at=now,
                 updated_at=now,
-                title=Path(filename).stem,
+                title=str(embedded_metadata.get("title", "")).strip() or Path(filename).stem,
+                artist=str(embedded_metadata.get("artist", "")).strip(),
+                album=str(embedded_metadata.get("album", "")).strip(),
+                rating=clamp_rating(embedded_metadata.get("rating", 0)),
             )
             library.tracks.insert(0, track)
             library.updated_at = now
             self._write_library(library)
             return track
 
-    def update_track(self, library_id: str, track_id: str, *, title: str, artist: str, album: str) -> Track:
+    def update_track(
+        self,
+        library_id: str,
+        track_id: str,
+        *,
+        title: str,
+        artist: str,
+        album: str,
+        rating: int | str = 0,
+    ) -> Track:
         with self._lock:
             library = self.get_library(library_id)
             track = self._find_track(library, track_id)
             track.title = title.strip()
             track.artist = artist.strip()
             track.album = album.strip()
+            track.rating = clamp_rating(rating)
+            write_mp3_metadata(
+                self.library_files_dir(library_id) / track.stored_name,
+                title=track.title,
+                artist=track.artist,
+                album=track.album,
+                rating=track.rating,
+            )
+            track.updated_at = _now()
+            library.updated_at = track.updated_at
+            self._write_library(library)
+            return track
+
+    def set_track_rating(self, library_id: str, track_id: str, *, rating: int | str) -> Track:
+        with self._lock:
+            library = self.get_library(library_id)
+            track = self._find_track(library, track_id)
+            track.rating = clamp_rating(rating)
+            write_mp3_metadata(
+                self.library_files_dir(library_id) / track.stored_name,
+                title=track.title,
+                artist=track.artist,
+                album=track.album,
+                rating=track.rating,
+            )
             track.updated_at = _now()
             library.updated_at = track.updated_at
             self._write_library(library)
@@ -244,19 +286,33 @@ class Store:
             return track
 
     def delete_track(self, library_id: str, track_id: str) -> None:
+        self.delete_tracks(library_id, [track_id])
+
+    def delete_tracks(self, library_id: str, track_ids: list[str]) -> int:
+        unique_track_ids = {track_id for track_id in track_ids if str(track_id).strip()}
+        if not unique_track_ids:
+            return 0
+
         with self._lock:
             library = self.get_library(library_id)
-            track = self._find_track(library, track_id)
-            file_path = self.library_files_dir(library_id) / track.stored_name
-            library.tracks = [item for item in library.tracks if item.id != track_id]
+            tracks_to_remove = [track for track in library.tracks if track.id in unique_track_ids]
+            if not tracks_to_remove:
+                raise TrackNotFoundError(",".join(sorted(unique_track_ids)))
+
+            library.tracks = [item for item in library.tracks if item.id not in unique_track_ids]
             library.updated_at = _now()
             self._write_library(library)
-            if file_path.exists():
-                file_path.unlink()
-            if track.cover_art_name:
-                cover_path = self.library_covers_dir(library_id) / track.cover_art_name
-                if cover_path.exists():
-                    cover_path.unlink()
+
+            for track in tracks_to_remove:
+                file_path = self.library_files_dir(library_id) / track.stored_name
+                if file_path.exists():
+                    file_path.unlink()
+                if track.cover_art_name:
+                    cover_path = self.library_covers_dir(library_id) / track.cover_art_name
+                    if cover_path.exists():
+                        cover_path.unlink()
+
+            return len(tracks_to_remove)
 
     def get_track_file(self, library_id: str, track_id: str) -> tuple[Track, Path]:
         library = self.get_library(library_id)

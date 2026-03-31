@@ -101,6 +101,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "artist": artist_name,
                     "cover_initials": cover_initials(album_name),
                     "cover_url": "",
+                    "search_value": f"{album_name} {artist_name}",
                     "tracks": [],
                 }
 
@@ -113,6 +114,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "title": track.title or Path(track.original_name).stem,
                     "artist": artist_name,
                     "album": album_name,
+                    "rating": track.rating,
                     "original_name": track.original_name,
                     "size": track.size,
                     "updated_at": track.updated_at,
@@ -120,6 +122,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "cover_initials": cover_initials(track.album or track.title or track.original_name),
                 }
             )
+            groups[key]["search_value"] = (
+                f"{groups[key]['search_value']} {track.title} {track.original_name}"
+            ).strip()
 
         for group in groups.values():
             for index, track in enumerate(group["tracks"], start=1):
@@ -169,6 +174,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         except LibraryNotFoundError:
             abort(404)
 
+        view_mode = request.args.get("view", "tracks").strip().lower()
+        if view_mode not in {"tracks", "albums"}:
+            view_mode = "tracks"
+
+        album_groups = build_album_groups(library)
+
         libraries = []
         for item in store.list_libraries():
             libraries.append(
@@ -181,13 +192,15 @@ def create_app(test_config: dict | None = None) -> Flask:
         return render_template(
             "library.html",
             library=library,
-            album_groups=build_album_groups(library),
+            album_groups=album_groups,
+            album_count=len(album_groups),
             libraries=libraries,
             other_libraries=[item for item in libraries if item["id"] != library.id],
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
             library_files_dir=store.library_files_dir(library.id),
             notice=request.args.get("notice", ""),
             error=request.args.get("error", ""),
+            view_mode=view_mode,
             track_url=track_url,
         )
 
@@ -245,6 +258,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 title=request.form.get("title", ""),
                 artist=request.form.get("artist", ""),
                 album=request.form.get("album", ""),
+                rating=request.form.get("rating", "0"),
             )
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
@@ -265,6 +279,36 @@ def create_app(test_config: dict | None = None) -> Flask:
             return jsonify({"ok": True})
 
         return redirect(url_for("view_library", library_id=library_id, notice="Track removed."))
+
+    @app.post("/s/<library_id>/tracks/<track_id>/rating")
+    def set_track_rating(library_id: str, track_id: str):
+        payload = request.get_json(silent=True) or {}
+        rating = payload.get("rating", request.form.get("rating", "0"))
+
+        try:
+            track = store.set_track_rating(library_id, track_id, rating=rating)
+        except (LibraryNotFoundError, TrackNotFoundError):
+            abort(404)
+
+        return jsonify({"ok": True, "track": {"id": track.id, "rating": track.rating}})
+
+    @app.post("/s/<library_id>/tracks/delete")
+    def delete_tracks(library_id: str):
+        payload = request.get_json(silent=True) or {}
+        track_ids = payload.get("track_ids", [])
+        if not isinstance(track_ids, list):
+            return jsonify({"ok": False, "error": "track_ids must be a list."}), 400
+
+        try:
+            deleted = store.delete_tracks(library_id, [str(track_id) for track_id in track_ids])
+        except (LibraryNotFoundError, TrackNotFoundError):
+            abort(404)
+
+        if wants_json():
+            return jsonify({"ok": True, "deleted": deleted})
+
+        notice = f"Removed {deleted} track{'s' if deleted != 1 else ''}."
+        return redirect(url_for("view_library", library_id=library_id, notice=notice))
 
     @app.get("/s/<library_id>/tracks/<track_id>/file")
     def stream_track(library_id: str, track_id: str):
@@ -301,16 +345,30 @@ def create_app(test_config: dict | None = None) -> Flask:
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
 
+        title = request.args.get("title", track.title or Path(track.original_name).stem)
+        artist = request.args.get("artist", track.artist)
+        album = request.args.get("album", track.album)
+
         try:
             candidates = app.config["LOOKUP_CLIENT"].search_release_candidates(
-                title=track.title or Path(track.original_name).stem,
-                artist=track.artist,
-                album=track.album,
+                title=title,
+                artist=artist,
+                album=album,
             )
         except LookupError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
-        return jsonify({"ok": True, "candidates": [candidate.to_dict() for candidate in candidates]})
+        return jsonify(
+            {
+                "ok": True,
+                "query": {
+                    "title": title,
+                    "artist": artist,
+                    "album": album,
+                },
+                "candidates": [candidate.to_dict() for candidate in candidates],
+            }
+        )
 
     @app.post("/s/<library_id>/tracks/<track_id>/lookup/apply")
     def apply_track_album_info(library_id: str, track_id: str):

@@ -57,9 +57,21 @@
               <p class="view-caption">All music</p>
               <h1>{{ library.id }}</h1>
             </div>
-            <div class="search-stack">
-              <input type="search" placeholder="Search" data-track-filter>
-              <span class="view-meta">{{ library.tracks|length }} track{% if library.tracks|length != 1 %}s{% endif %}</span>
+            <div class="view-band-actions">
+              <div class="view-switcher">
+                <a class="frame-button{% if view_mode == 'tracks' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='tracks') }}">Tracks</a>
+                <a class="frame-button{% if view_mode == 'albums' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='albums') }}">Albums</a>
+              </div>
+              <div class="search-stack">
+                <input type="search" placeholder="Search" data-track-filter>
+                <span class="view-meta">
+                  {% if view_mode == 'albums' %}
+                    {{ album_count }} album{% if album_count != 1 %}s{% endif %}
+                  {% else %}
+                    {{ library.tracks|length }} track{% if library.tracks|length != 1 %}s{% endif %}
+                  {% endif %}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -84,30 +96,31 @@
             <div class="flash error">{{ error }}</div>
           {% endif %}
 
-          <section class="table-shell media-shell">
-            <div class="table-head media-head">
-              <span>Album</span>
-              <span>#</span>
-              <span>Title</span>
-              <span>Length</span>
-              <span>Rating</span>
-              <span>Contributing artist</span>
-              <span>Album</span>
-              <span>Size</span>
-            </div>
+          <section class="{% if view_mode == 'albums' %}album-browser-shell{% else %}table-shell media-shell{% endif %}">
+            {% if view_mode != 'albums' %}
+              <div class="table-head media-head">
+                <span>Album</span>
+                <span>#</span>
+                <span>Title</span>
+                <span>Length</span>
+                <span>Rating</span>
+                <span>Contributing artist</span>
+                <span>Album</span>
+                <span>Size</span>
+              </div>
+            {% endif %}
 
             {% if album_groups %}
-              <div class="album-sections">
+              <div class="album-sections{% if view_mode == 'albums' %} album-browser{% endif %}">
                 {% for group in album_groups %}
-                  <section class="album-section" data-album-section>
+                  <section class="album-section{% if view_mode == 'albums' %} album-browser-card{% endif %}" data-album-section data-album-container>
                     <div class="album-summary">
-                      <div class="album-art">
-                        {% if group.cover_url %}
-                          <img src="{{ group.cover_url }}" alt="{{ group.name }} cover art">
-                        {% else %}
-                          {{ group.cover_initials }}
-                        {% endif %}
-                      </div>
+                      {% set art_id = '' %}
+                      {% set art_classes = 'album-art' %}
+                      {% set art_cover_url = group.cover_url %}
+                      {% set art_alt_text = group.name ~ ' cover art' %}
+                      {% set art_fallback_text = group.cover_initials %}
+                      {% include '_album_art.html' %}
                       <div class="album-meta">
                         <p class="album-title">{{ group.name }}</p>
                         <p>{{ group.artist }}</p>
@@ -115,21 +128,25 @@
                       </div>
                     </div>
 
-                    <div class="track-stack">
+                    <div class="track-stack{% if view_mode == 'albums' %} album-browser-track-stack{% endif %}">
                       {% for track in group.tracks %}
-                        <button
-                          type="button"
-                          class="track-row"
+                        <div
+                          role="button"
+                          tabindex="0"
+                          class="track-row{% if view_mode == 'albums' %} album-browser-track{% endif %}"
                           data-track-row
+                          data-track-id="{{ track.id }}"
                           data-search="{{ (track.title ~ ' ' ~ track.artist ~ ' ' ~ track.album ~ ' ' ~ track.original_name)|lower }}"
                           data-track-src="{{ track_url(library.id, track.id) }}"
                           data-track-title="{{ track.title }}"
                           data-track-artist="{{ track.artist }}"
                           data-track-album="{{ track.album }}"
+                          data-track-rating="{{ track.rating }}"
                           data-track-filename="{{ track.original_name }}"
                           data-track-size="{{ track.size|filesize }}"
                           data-track-updated="{{ track.updated_at|friendly_time }}"
                           data-track-update-url="{{ url_for('update_track', library_id=library.id, track_id=track.id) }}"
+                          data-track-rating-url="{{ url_for('set_track_rating', library_id=library.id, track_id=track.id) }}"
                           data-track-delete-url="{{ url_for('delete_track', library_id=library.id, track_id=track.id) }}"
                           data-track-lookup-url="{{ url_for('lookup_track_album_info', library_id=library.id, track_id=track.id) }}"
                           data-track-lookup-apply-url="{{ url_for('apply_track_album_info', library_id=library.id, track_id=track.id) }}"
@@ -139,11 +156,22 @@
                           <span>{{ track.number }}</span>
                           <span class="track-name-cell">{{ track.title }}</span>
                           <span class="track-faint">--:--</span>
-                          <span class="track-faint">&#9734;&#9734;&#9734;&#9734;&#9734;</span>
+                          <span class="track-faint inline-rating" data-inline-rating>
+                            {% for value in range(1, 6) %}
+                              <button
+                                type="button"
+                                class="inline-rating-star{% if value <= track.rating %} is-active{% endif %}"
+                                data-inline-rating-value="{{ value }}"
+                                aria-label="Set {{ track.title }} to {{ value }} stars"
+                              >
+                                {% if value <= track.rating %}&#9733;{% else %}&#9734;{% endif %}
+                              </button>
+                            {% endfor %}
+                          </span>
                           <span>{{ track.artist }}</span>
                           <span>{{ track.album }}</span>
                           <span>{{ track.size|filesize }}</span>
-                        </button>
+                        </div>
                       {% endfor %}
                     </div>
                   </section>
@@ -156,7 +184,12 @@
 
           <section class="selection-dock">
             <div class="selection-card">
-              <div class="selection-art" id="selection-art">SS</div>
+              {% set art_id = 'selection-art' %}
+              {% set art_classes = 'selection-art' %}
+              {% set art_cover_url = '' %}
+              {% set art_alt_text = 'Selected track cover art' %}
+              {% set art_fallback_text = 'SS' %}
+              {% include '_album_art.html' %}
               <div>
                 <p class="dock-label">Selected track</p>
                 <h2 id="now-playing-title">Select a track</h2>
@@ -164,25 +197,34 @@
               </div>
             </div>
 
-            <form class="editor-form" data-editor-form>
-              <label>
-                <span>Title</span>
-                <input type="text" name="title" id="edit-title" disabled>
-              </label>
-              <label>
-                <span>Artist</span>
-                <input type="text" name="artist" id="edit-artist" disabled>
-              </label>
-              <label>
-                <span>Album</span>
-                <input type="text" name="album" id="edit-album" disabled>
-              </label>
-              <div class="editor-actions">
-                <button type="submit" class="frame-button primary" id="save-track" disabled>Save</button>
+            <div class="selection-panel">
+              <div class="selection-actions">
+                <button type="button" class="frame-button" id="toggle-editor" aria-expanded="false" disabled>Edit details</button>
                 <button type="button" class="frame-button" id="find-album-info" disabled>Find album info</button>
-                <button type="button" class="frame-button danger" id="delete-track" disabled>Delete</button>
+                <button type="button" class="frame-button danger" id="delete-track" data-bulk-delete-url="{{ url_for('delete_tracks', library_id=library.id) }}" disabled>Delete</button>
               </div>
-            </form>
+
+              <div class="editor-accordion" id="editor-accordion">
+                <form class="editor-form" data-editor-form>
+                  <input type="hidden" name="rating" id="edit-rating" value="0">
+                  <label>
+                    <span>Title</span>
+                    <input type="text" name="title" id="edit-title" disabled>
+                  </label>
+                  <label>
+                    <span>Artist</span>
+                    <input type="text" name="artist" id="edit-artist" disabled>
+                  </label>
+                  <label>
+                    <span>Album</span>
+                    <input type="text" name="album" id="edit-album" disabled>
+                  </label>
+                  <div class="editor-actions">
+                    <button type="submit" class="frame-button primary" id="save-track" disabled>Save</button>
+                  </div>
+                </form>
+              </div>
+            </div>
           </section>
 
           <section class="transport-band">
@@ -219,9 +261,33 @@
           </div>
           <button type="submit" class="frame-button">Close</button>
         </div>
-        <p class="lookup-status" id="lookup-status">Search MusicBrainz and choose a release to apply.</p>
+        <div class="lookup-search-form">
+          <label>
+            <span>Title</span>
+            <input type="text" id="lookup-title">
+          </label>
+          <label>
+            <span>Artist</span>
+            <input type="text" id="lookup-artist">
+          </label>
+          <label>
+            <span>Album</span>
+            <input type="text" id="lookup-album">
+          </label>
+          <div class="lookup-search-actions">
+            <button type="button" class="frame-button primary" id="lookup-search-button">Search MusicBrainz</button>
+          </div>
+        </div>
+        <p class="lookup-status" id="lookup-status">Enter at least two fields, then search MusicBrainz and choose a release to apply.</p>
         <div class="lookup-results" id="lookup-results"></div>
       </form>
     </dialog>
+
+    <div class="global-busy" id="global-busy" hidden>
+      <div class="global-busy-card">
+        <div class="global-busy-spinner"></div>
+        <p id="global-busy-text" aria-live="polite">Working...</p>
+      </div>
+    </div>
   </body>
 </html>

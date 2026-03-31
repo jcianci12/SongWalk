@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Songshare Library</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+  </head>
+  <body class="wmp-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
+    <div class="wmp-window home-window">
+      <header class="title-band">
+        <div class="title-band-left">
+          <span class="app-mark">Songshare</span>
+          <span class="crumbs">Library &gt; Music &gt; Shared libraries</span>
+        </div>
+        <div class="title-actions">
+          <form action="{{ url_for('create_library') }}" method="post">
+            <button type="submit" class="frame-button primary">Create library</button>
+          </form>
+        </div>
+      </header>
+
+      <div class="menu-band">
+        <div class="menu-links">
+          <span>Open an existing share or create a new one.</span>
+        </div>
+        <form class="share-jump" data-open-share>
+          <input type="text" name="target" placeholder="Paste a share URL or UUID">
+          <button type="submit" class="frame-button">Open</button>
+        </form>
+      </div>
+
+      <div class="workspace">
+        <aside class="nav-pane">
+          <div class="nav-group">
+            <p class="nav-title">Library</p>
+            <a class="nav-item is-active" href="{{ url_for('home') }}">Music</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Shared libraries</p>
+            {% if libraries %}
+              {% for library in libraries %}
+                <a class="nav-item" href="{{ library.browse_url }}">{{ library.id[:8] }}</a>
+              {% endfor %}
+            {% else %}
+              <span class="nav-item muted">No shares yet</span>
+            {% endif %}
+          </div>
+        </aside>
+
+        <main class="content-pane">
+          <div class="view-band">
+            <div>
+              <p class="view-caption">All music</p>
+              <h1>Shared libraries</h1>
+            </div>
+            <span class="view-meta">{{ libraries|length }} librar{% if libraries|length == 1 %}y{% else %}ies{% endif %}</span>
+          </div>
+
+          <div class="info-strip">
+            <span>Storage root: <code>{{ data_dir }}</code></span>
+            <span>Anyone with a share URL can upload and edit track metadata.</span>
+          </div>
+
+          <div class="table-shell">
+            <div class="table-head library-table-head">
+              <span>Name</span>
+              <span>Tracks</span>
+              <span>Last updated</span>
+              <span>Folder</span>
+              <span>Share</span>
+            </div>
+
+            {% if libraries %}
+              <div class="table-body">
+                {% for library in libraries %}
+                  <div class="library-row">
+                    <div class="library-row-main">
+                      <a class="library-link" href="{{ library.browse_url }}">{{ library.id }}</a>
+                    </div>
+                    <div>{{ library.track_count }}</div>
+                    <div>{{ library.updated_at|friendly_time }}</div>
+                    <div class="path-cell">{{ library.files_dir }}</div>
+                    <div class="row-actions">
+                      <a class="row-link" href="{{ library.browse_url }}">Open</a>
+                      <button type="button" class="row-link" data-copy="{{ library.share_url }}">Copy link</button>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="empty-table">Create the first library to start sharing music.</div>
+            {% endif %}
+          </div>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,10 @@
+services:
+  songshare:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      SONGSHARE_DATA_DIR: /data
+      SONGSHARE_BASE_URL: http://localhost:8080
+    volumes:
+      - ./songshare-data:/data

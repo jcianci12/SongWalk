@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Songshare {{ library.id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+  </head>
+  <body class="wmp-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
+    <div class="wmp-window">
+      <header class="title-band">
+        <div class="title-band-left">
+          <span class="app-mark">Songshare</span>
+          <span class="crumbs">Library &gt; Music &gt; {{ library.id[:8] }}</span>
+        </div>
+        <div class="title-actions">
+          <a class="frame-button" href="{{ url_for('home') }}">All libraries</a>
+          <button type="button" class="frame-button" data-copy="{{ share_url }}">Copy share link</button>
+        </div>
+      </header>
+
+      <div class="menu-band">
+        <div class="menu-links">
+          <span>Import tracks, search, play, and edit metadata for this shared library.</span>
+        </div>
+        <div class="command-actions">
+          <label class="frame-button">
+            Import tracks
+            <input type="file" name="tracks" multiple accept=".aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,.wma,audio/*" data-hidden-file-input>
+          </label>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <aside class="nav-pane">
+          <div class="nav-group">
+            <p class="nav-title">Library</p>
+            <a class="nav-item" href="{{ url_for('home') }}">All music</a>
+            <span class="nav-item is-active">{{ library.id[:8] }}</span>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Other libraries</p>
+            {% if other_libraries %}
+              {% for item in other_libraries %}
+                <a class="nav-item" href="{{ item.browse_url }}">{{ item.id[:8] }}</a>
+              {% endfor %}
+            {% else %}
+              <span class="nav-item muted">No other libraries</span>
+            {% endif %}
+          </div>
+        </aside>
+
+        <main class="content-pane">
+          <div class="view-band">
+            <div>
+              <p class="view-caption">All music</p>
+              <h1>{{ library.id }}</h1>
+            </div>
+            <div class="search-stack">
+              <input type="search" placeholder="Search" data-track-filter>
+              <span class="view-meta">{{ library.tracks|length }} track{% if library.tracks|length != 1 %}s{% endif %}</span>
+            </div>
+          </div>
+
+          <form
+            action="{{ url_for('upload_tracks', library_id=library.id) }}"
+            method="post"
+            enctype="multipart/form-data"
+            class="upload-tray"
+            data-upload-form
+          >
+            <label class="upload-prompt" data-dropzone>
+              <span>Drop music into this library or click Import tracks.</span>
+              <small>{{ library_files_dir }}</small>
+            </label>
+            <p class="status-line" data-upload-status></p>
+          </form>
+
+          {% if notice %}
+            <div class="flash notice">{{ notice }}</div>
+          {% endif %}
+          {% if error %}
+            <div class="flash error">{{ error }}</div>
+          {% endif %}
+
+          <section class="table-shell media-shell">
+            <div class="table-head media-head">
+              <span>Album</span>
+              <span>#</span>
+              <span>Title</span>
+              <span>Length</span>
+              <span>Rating</span>
+              <span>Contributing artist</span>
+              <span>Album</span>
+              <span>Size</span>
+            </div>
+
+            {% if album_groups %}
+              <div class="album-sections">
+                {% for group in album_groups %}
+                  <section class="album-section" data-album-section>
+                    <div class="album-summary">
+                      <div class="album-art">
+                        {% if group.cover_url %}
+                          <img src="{{ group.cover_url }}" alt="{{ group.name }} cover art">
+                        {% else %}
+                          {{ group.cover_initials }}
+                        {% endif %}
+                      </div>
+                      <div class="album-meta">
+                        <p class="album-title">{{ group.name }}</p>
+                        <p>{{ group.artist }}</p>
+                        <p>{{ group.tracks|length }} track{% if group.tracks|length != 1 %}s{% endif %}</p>
+                      </div>
+                    </div>
+
+                    <div class="track-stack">
+                      {% for track in group.tracks %}
+                        <button
+                          type="button"
+                          class="track-row"
+                          data-track-row
+                          data-search="{{ (track.title ~ ' ' ~ track.artist ~ ' ' ~ track.album ~ ' ' ~ track.original_name)|lower }}"
+                          data-track-src="{{ track_url(library.id, track.id) }}"
+                          data-track-title="{{ track.title }}"
+                          data-track-artist="{{ track.artist }}"
+                          data-track-album="{{ track.album }}"
+                          data-track-filename="{{ track.original_name }}"
+                          data-track-size="{{ track.size|filesize }}"
+                          data-track-updated="{{ track.updated_at|friendly_time }}"
+                          data-track-update-url="{{ url_for('update_track', library_id=library.id, track_id=track.id) }}"
+                          data-track-delete-url="{{ url_for('delete_track', library_id=library.id, track_id=track.id) }}"
+                          data-track-lookup-url="{{ url_for('lookup_track_album_info', library_id=library.id, track_id=track.id) }}"
+                          data-track-lookup-apply-url="{{ url_for('apply_track_album_info', library_id=library.id, track_id=track.id) }}"
+                          data-track-cover-url="{{ track.cover_url }}"
+                          data-track-cover-initials="{{ track.cover_initials }}"
+                        >
+                          <span>{{ track.number }}</span>
+                          <span class="track-name-cell">{{ track.title }}</span>
+                          <span class="track-faint">--:--</span>
+                          <span class="track-faint">&#9734;&#9734;&#9734;&#9734;&#9734;</span>
+                          <span>{{ track.artist }}</span>
+                          <span>{{ track.album }}</span>
+                          <span>{{ track.size|filesize }}</span>
+                        </button>
+                      {% endfor %}
+                    </div>
+                  </section>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="empty-table">No tracks yet. Import some music to populate the library view.</div>
+            {% endif %}
+          </section>
+
+          <section class="selection-dock">
+            <div class="selection-card">
+              <div class="selection-art" id="selection-art">SS</div>
+              <div>
+                <p class="dock-label">Selected track</p>
+                <h2 id="now-playing-title">Select a track</h2>
+                <p id="now-playing-meta">Choose a row to edit metadata or play it from the transport bar.</p>
+              </div>
+            </div>
+
+            <form class="editor-form" data-editor-form>
+              <label>
+                <span>Title</span>
+                <input type="text" name="title" id="edit-title" disabled>
+              </label>
+              <label>
+                <span>Artist</span>
+                <input type="text" name="artist" id="edit-artist" disabled>
+              </label>
+              <label>
+                <span>Album</span>
+                <input type="text" name="album" id="edit-album" disabled>
+              </label>
+              <div class="editor-actions">
+                <button type="submit" class="frame-button primary" id="save-track" disabled>Save</button>
+                <button type="button" class="frame-button" id="find-album-info" disabled>Find album info</button>
+                <button type="button" class="frame-button danger" id="delete-track" disabled>Delete</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="transport-band">
+            <audio id="deck-player" preload="none"></audio>
+            <div class="transport-controls">
+              <button type="button" class="transport-button" data-transport-prev>&#9664;&#9664;</button>
+              <button type="button" class="transport-play" data-transport-play>&#9654;</button>
+              <button type="button" class="transport-button" data-transport-next>&#9654;&#9654;</button>
+            </div>
+            <div class="transport-progress">
+              <span id="current-time">0:00</span>
+              <input type="range" min="0" max="100" value="0" data-transport-progress>
+              <span id="duration-time">0:00</span>
+            </div>
+            <div class="transport-volume">
+              <span>Volume</span>
+              <input type="range" min="0" max="1" step="0.01" value="0.75" data-transport-volume>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="context-menu" id="track-context-menu" hidden>
+      <button type="button" class="context-menu-item" id="context-find-album-info">Find album info</button>
+    </div>
+
+    <dialog class="lookup-dialog" id="lookup-dialog">
+      <form method="dialog" class="lookup-dialog-card">
+        <div class="lookup-dialog-head">
+          <div>
+            <p class="dock-label">Match album info</p>
+            <h2>Find album info</h2>
+          </div>
+          <button type="submit" class="frame-button">Close</button>
+        </div>
+        <p class="lookup-status" id="lookup-status">Search MusicBrainz and choose a release to apply.</p>
+        <div class="lookup-results" id="lookup-results"></div>
+      </form>
+    </dialog>
+  </body>
+</html>

@@ -123,7 +123,7 @@ function Choose-Runtime {
   }
 
   while ($true) {
-    $answer = Read-Host "Run Songshare with Docker or Python? [docker/python]"
+    $answer = Read-Host "Run SongWalk with Docker or Python? [docker/python]"
     switch ($answer.Trim().ToLowerInvariant()) {
       "docker" { return "docker" }
       "d" { return "docker" }
@@ -142,7 +142,7 @@ function Test-SongshareReady {
 
   try {
     $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
-    return $response.Content -match "Songshare"
+    return $response.Content -match "SongWalk|Songshare"
   }
   catch {
     return $false
@@ -166,7 +166,7 @@ function Show-PythonLogs {
     $stdout = Get-Content $StdoutLog -Tail 40 -ErrorAction SilentlyContinue | Out-String
     if (-not [string]::IsNullOrWhiteSpace($stdout)) {
       Write-Host ""
-      Write-Host "songshare stdout:"
+      Write-Host "songwalk stdout:"
       Write-Host $stdout.TrimEnd()
     }
   }
@@ -175,7 +175,7 @@ function Show-PythonLogs {
     $stderr = Get-Content $StderrLog -Tail 40 -ErrorAction SilentlyContinue | Out-String
     if (-not [string]::IsNullOrWhiteSpace($stderr)) {
       Write-Host ""
-      Write-Host "songshare stderr:"
+      Write-Host "songwalk stderr:"
       Write-Host $stderr.TrimEnd()
     }
   }
@@ -201,7 +201,7 @@ function Wait-ForSongshare {
       $Process.Refresh()
       if ($Process.HasExited) {
         Show-PythonLogs
-        Fail -Message "Songshare exited before it became ready." -Details @($FailureHint)
+        Fail -Message "SongWalk exited before it became ready." -Details @($FailureHint)
       }
     }
 
@@ -212,7 +212,7 @@ function Wait-ForSongshare {
     Show-PythonLogs
   }
 
-  Fail -Message "Timed out waiting for Songshare at $Url." -Details @($FailureHint)
+  Fail -Message "Timed out waiting for SongWalk at $Url." -Details @($FailureHint)
 }
 
 function Resolve-PythonLaunch {
@@ -252,14 +252,14 @@ function Start-PythonRuntime {
 
   $localUrl = "http://127.0.0.1:$LocalPort/"
   if (Test-SongshareReady -Url $localUrl) {
-    Write-Host "Songshare is already responding on $localUrl. Reusing the existing Python/local instance."
+    Write-Host "SongWalk is already responding on $localUrl. Reusing the existing Python/local instance."
     return $null
   }
 
   $python = Resolve-PythonLaunch
   $importCheck = Invoke-Captured -FilePath $python.FilePath -Arguments ($python.Arguments + @("-c", "import songshare"))
   if ($importCheck.ExitCode -ne 0) {
-    Fail -Message "Python could not import the Songshare app." -Details @(
+    Fail -Message "Python could not import the SongWalk app." -Details @(
       "Tried: $($python.DisplayName)",
       $importCheck.Output,
       "Install dependencies with: pip install -r requirements.txt"
@@ -268,7 +268,7 @@ function Start-PythonRuntime {
 
   Remove-Item -LiteralPath $StdoutLog, $StderrLog -Force -ErrorAction SilentlyContinue
 
-  Write-Host "Starting Songshare with $($python.DisplayName)..."
+  Write-Host "Starting SongWalk with $($python.DisplayName)..."
   $previousSongsharePort = $env:SONGSHARE_PORT
   $env:SONGSHARE_PORT = [string]$LocalPort
   $process = Start-Process `
@@ -307,11 +307,11 @@ function Start-DockerRuntime {
 
   $localUrl = "http://127.0.0.1:$LocalPort/"
   if (Test-SongshareReady -Url $localUrl) {
-    Write-Host "Songshare is already responding on $localUrl. Reusing the existing local service."
+    Write-Host "SongWalk is already responding on $localUrl. Reusing the existing local service."
     return
   }
 
-  Write-Host "Starting Songshare with Docker Compose..."
+  Write-Host "Starting SongWalk with Docker Compose..."
   $previousPublishedPort = $env:SONGSHARE_PUBLISHED_PORT
   $env:SONGSHARE_PUBLISHED_PORT = [string]$LocalPort
   $result = Invoke-Captured -FilePath "docker" -Arguments @("compose", "up", "--build", "-d")
@@ -334,7 +334,7 @@ function Start-DockerRuntime {
   }
 
   Show-DockerComposeLogs
-  Fail -Message "Timed out waiting for Songshare at $localUrl." -Details @("Inspect 'docker compose logs --tail=80 songshare' for details.")
+  Fail -Message "Timed out waiting for SongWalk at $localUrl." -Details @("Inspect 'docker compose logs --tail=80 songshare' for details.")
 }
 
 function Start-QuickTunnel {
@@ -415,7 +415,7 @@ try {
   $ownerPath = Get-OwnerPath
 
   Write-Host ""
-  Write-Host "Songshare is ready."
+  Write-Host "SongWalk is ready."
   Write-Host "Local URL: http://localhost:$Port/"
   Write-Host "Public URL: $publicUrl"
   if ($ownerPath) {

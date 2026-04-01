@@ -18,7 +18,7 @@ def main() -> None:
     owner_url_path.write_text(
         "\n".join(
             [
-                "Songshare owner dashboard",
+                "SongWalk owner dashboard",
                 local_owner_url,
                 "",
                 "If you are using a public tunnel or reverse proxy, append this private path to that host instead:",
@@ -28,8 +28,8 @@ def main() -> None:
         + "\n",
         encoding="utf-8",
     )
-    print(f"Songshare owner dashboard: {local_owner_url}", flush=True)
-    print(f"Songshare owner URL file: {owner_url_path}", flush=True)
+    print(f"SongWalk owner dashboard: {local_owner_url}", flush=True)
+    print(f"SongWalk owner URL file: {owner_url_path}", flush=True)
 
     if dev_mode:
         app.run(

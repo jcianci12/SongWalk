@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Songshare {{ library.id }}</title>
+    <title>SongWalk {{ library.id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
   </head>
@@ -11,7 +11,7 @@
     <div class="wmp-window">
       <header class="title-band">
         <div class="title-band-left">
-          <span class="app-mark" href="{{ url_for('home') }}">Songshare</span> 
+          {% include '_brand.html' %}
           {% if local_access_mode %}
             <span class="local-access-badge" title="Direct local access">🖥️ Local</span>
           {% endif %}
@@ -288,7 +288,7 @@
                   {% set art_classes = 'selection-art' %}
                   {% set art_cover_url = '' %}
                   {% set art_alt_text = 'Selected track cover art' %}
-                  {% set art_fallback_text = 'SS' %}
+                  {% set art_fallback_text = 'SW' %}
                   {% include '_album_art.html' %}
                   <div>
                     <p class="dock-label">Selected track</p>

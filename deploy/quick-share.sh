@@ -50,7 +50,7 @@ choose_runtime() {
   fi
 
   while true; do
-    read -r -p "Run Songshare with Docker or Python? [docker/python] " answer
+    read -r -p "Run SongWalk with Docker or Python? [docker/python] " answer
     case "${answer,,}" in
       docker|d)
         echo "docker"
@@ -70,7 +70,7 @@ choose_runtime() {
 test_songshare_ready() {
   local body
   body="$(curl -fsSL --max-time 3 -L "http://127.0.0.1:${PORT}/" 2>/dev/null || true)"
-  [[ "$body" == *Songshare* ]]
+  [[ "$body" == *SongWalk* || "$body" == *Songshare* ]]
 }
 
 show_python_logs() {
@@ -107,7 +107,7 @@ wait_for_songshare() {
 
     if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
       show_python_logs
-      fail "Songshare exited before it became ready." "$failure_hint"
+      fail "SongWalk exited before it became ready." "$failure_hint"
     fi
 
     sleep 1
@@ -117,7 +117,7 @@ wait_for_songshare() {
     show_python_logs
   fi
 
-  fail "Timed out waiting for Songshare at http://127.0.0.1:${PORT}/." "$failure_hint"
+  fail "Timed out waiting for SongWalk at http://127.0.0.1:${PORT}/." "$failure_hint"
 }
 
 resolve_python() {
@@ -141,7 +141,7 @@ resolve_python() {
 
 start_python_runtime() {
   if test_songshare_ready; then
-    echo "Songshare is already responding on http://127.0.0.1:${PORT}/. Reusing the existing Python/local instance."
+    echo "SongWalk is already responding on http://127.0.0.1:${PORT}/. Reusing the existing Python/local instance."
     return
   fi
 
@@ -149,11 +149,11 @@ start_python_runtime() {
   python_bin="$(resolve_python)"
   local import_output
   if ! import_output="$(cd "$ROOT_DIR" && "$python_bin" -c 'import songshare' 2>&1)"; then
-    fail "Python could not import the Songshare app." "Tried: $python_bin" "$import_output" "Install dependencies with: pip install -r requirements.txt"
+    fail "Python could not import the SongWalk app." "Tried: $python_bin" "$import_output" "Install dependencies with: pip install -r requirements.txt"
   fi
 
   rm -f "$STDOUT_LOG" "$STDERR_LOG"
-  echo "Starting Songshare with ${python_bin}..."
+  echo "Starting SongWalk with ${python_bin}..."
   (
     cd "$ROOT_DIR"
     SONGSHARE_PORT="$PORT" nohup "$python_bin" -m songshare >"$STDOUT_LOG" 2>"$STDERR_LOG" &
@@ -177,11 +177,11 @@ show_docker_logs() {
 
 start_docker_runtime() {
   if test_songshare_ready; then
-    echo "Songshare is already responding on http://127.0.0.1:${PORT}/. Reusing the existing local service."
+    echo "SongWalk is already responding on http://127.0.0.1:${PORT}/. Reusing the existing local service."
     return
   fi
 
-  echo "Starting Songshare with Docker Compose..."
+  echo "Starting SongWalk with Docker Compose..."
   if ! (cd "$ROOT_DIR" && SONGSHARE_PUBLISHED_PORT="$PORT" docker compose up --build -d); then
     fail "docker compose up failed."
   fi
@@ -195,7 +195,7 @@ start_docker_runtime() {
   done
 
   show_docker_logs
-  fail "Timed out waiting for Songshare at http://127.0.0.1:${PORT}/." "Inspect 'docker compose logs --tail=80 songshare' for details."
+  fail "Timed out waiting for SongWalk at http://127.0.0.1:${PORT}/." "Inspect 'docker compose logs --tail=80 songshare' for details."
 }
 
 start_quick_tunnel() {
@@ -271,7 +271,7 @@ PUBLIC_URL="$(start_quick_tunnel "$SELECTED_RUNTIME")"
 OWNER_PATH="$(get_owner_path)"
 
 echo
-echo "Songshare is ready."
+echo "SongWalk is ready."
 echo "Local URL: http://localhost:${PORT}/"
 echo "Public URL: $PUBLIC_URL"
 if [[ -n "$OWNER_PATH" ]]; then

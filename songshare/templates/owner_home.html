@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Songshare Owner</title>
+    <title>SongWalk Owner</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
   </head>
@@ -11,7 +11,7 @@
     <div class="wmp-window home-window">
       <header class="title-band">
         <div class="title-band-left">
-          <span class="app-mark">Songshare</span>
+          {% include '_brand.html' %}
           {% if local_access_mode %}
             <span class="local-access-badge" title="Direct local access">🖥️ Local</span>
           {% endif %}

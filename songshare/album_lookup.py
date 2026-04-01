@@ -41,7 +41,7 @@ class MusicMetadataClient:
     api_root = "https://musicbrainz.org/ws/2"
     cover_art_root = "https://coverartarchive.org"
 
-    def __init__(self, user_agent: str = "Songshare/0.1 ( https://localhost )"):
+    def __init__(self, user_agent: str = "SongWalk/0.1 ( https://localhost )"):
         self._user_agent = user_agent
         self._lock = threading.Lock()
         self._last_request_at = 0.0

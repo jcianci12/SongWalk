@@ -64,11 +64,57 @@ function Invoke-Captured {
     [string[]]$Arguments = @()
   )
 
-  $output = & $FilePath @Arguments 2>&1 | Out-String
-  return @{
-    ExitCode = $LASTEXITCODE
-    Output = $output.TrimEnd()
+  $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $processInfo.FileName = $FilePath
+  $processInfo.Arguments = Join-CommandArguments -Arguments $Arguments
+  $processInfo.WorkingDirectory = $RepoRoot
+  $processInfo.UseShellExecute = $false
+  $processInfo.RedirectStandardOutput = $true
+  $processInfo.RedirectStandardError = $true
+
+  $process = New-Object System.Diagnostics.Process
+  $process.StartInfo = $processInfo
+  try {
+    [void]$process.Start()
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    $output = (($stdout, $stderr) -join "") -replace "\r?\n$", ""
+    return @{
+      ExitCode = $process.ExitCode
+      Output = $output.TrimEnd()
+    }
   }
+  finally {
+    $process.Dispose()
+  }
+}
+
+function Join-CommandArguments {
+  param(
+    [string[]]$Arguments = @()
+  )
+
+  if (-not $Arguments -or $Arguments.Count -eq 0) {
+    return ""
+  }
+
+  $encoded = foreach ($argument in $Arguments) {
+    if ($null -eq $argument) {
+      '""'
+      continue
+    }
+
+    if ($argument -notmatch '[\s"]') {
+      $argument
+      continue
+    }
+
+    '"' + (($argument -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+  }
+
+  return ($encoded -join " ")
 }
 
 function Choose-Runtime {

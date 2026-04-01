@@ -12,18 +12,16 @@
       <header class="title-band">
         <div class="title-band-left">
           <span class="app-mark">Songshare</span>
-          <span class="crumbs">Library &gt; Music &gt; Shared libraries</span>
-        </div>
-        <div class="title-actions">
-          <form action="{{ url_for('create_library') }}" method="post">
-            <button type="submit" class="frame-button primary">Create library</button>
-          </form>
+          {% if local_access_mode %}
+            <span class="local-access-badge" title="Direct local access">🖥️ Local</span>
+          {% endif %}
+          <span class="crumbs">Library &gt; Music &gt; Share access</span>
         </div>
       </header>
 
       <div class="menu-band">
         <div class="menu-links">
-          <span>Open an existing share or create a new one.</span>
+          <span>Open a specific shared library by pasting its URL or UUID.</span>
         </div>
         <form class="share-jump" data-open-share>
           <input type="text" name="target" placeholder="Paste a share URL or UUID">
@@ -32,93 +30,27 @@
       </div>
 
       <div class="workspace">
-        <aside class="nav-pane">
-          <div class="nav-group">
-            <p class="nav-title">Library</p>
-            <a class="nav-item is-active" href="{{ url_for('home') }}">Music</a>
-          </div>
-          <div class="nav-group">
-            <p class="nav-title">Shared libraries</p>
-            {% if libraries %}
-              {% for library in libraries %}
-                <div class="nav-item-row">
-                  <a class="nav-item" href="{{ library.browse_url }}">{{ library.id[:8] }}</a>
-                  <form
-                    action="{{ library.delete_url }}"
-                    method="post"
-                    class="inline-icon-form"
-                    data-delete-library-form
-                    data-library-label="{{ library.id[:8] }}"
-                    data-redirect-url="{{ url_for('home') }}"
-                  >
-                    <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ library.id[:8] }}" title="Delete library">
-                      &#128465;
-                    </button>
-                  </form>
-                </div>
-              {% endfor %}
-            {% else %}
-              <span class="nav-item muted">No shares yet</span>
-            {% endif %}
-          </div>
-        </aside>
-
         <main class="content-pane">
           <div class="view-band">
             <div>
-              <p class="view-caption">All music</p>
-              <h1>Shared libraries</h1>
+              <p class="view-caption">Direct access only</p>
+              <h1>Open a shared library</h1>
             </div>
-            <span class="view-meta">{{ libraries|length }} librar{% if libraries|length == 1 %}y{% else %}ies{% endif %}</span>
           </div>
 
           <div class="info-strip">
             <span>Storage root: <code>{{ data_dir }}</code></span>
-            <span>Anyone with a share URL can upload and edit track metadata.</span>
+            <span>This page does not reveal any existing library IDs.</span>
           </div>
 
-          <div class="table-shell">
-            <div class="table-head library-table-head">
-              <span>Name</span>
-              <span>Tracks</span>
-              <span>Last updated</span>
-              <span>Folder</span>
-              <span>Share</span>
+          <section class="share-entry-card">
+            <p class="share-entry-lead">Ask the sender for a full share URL, then paste it above to open that library directly.</p>
+            <div class="share-example-shell">
+              <p class="dock-label">Example format</p>
+              <code>{{ base_url }}/s/12345678-1234-1234-1234-123456789abc</code>
             </div>
-
-            {% if libraries %}
-              <div class="table-body">
-                {% for library in libraries %}
-                  <div class="library-row">
-                    <div class="library-row-main">
-                      <a class="library-link" href="{{ library.browse_url }}">{{ library.id }}</a>
-                    </div>
-                    <div>{{ library.track_count }}</div>
-                    <div>{{ library.updated_at|friendly_time }}</div>
-                    <div class="path-cell">{{ library.files_dir }}</div>
-                    <div class="row-actions">
-                      <a class="row-link" href="{{ library.browse_url }}">Open</a>
-                      <button type="button" class="row-link" data-copy="{{ library.share_url }}">Copy link</button>
-                      <form
-                        action="{{ library.delete_url }}"
-                        method="post"
-                        class="inline-icon-form"
-                        data-delete-library-form
-                        data-library-label="{{ library.id }}"
-                        data-redirect-url="{{ url_for('home') }}"
-                      >
-                        <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ library.id }}" title="Delete library">
-                          &#128465;
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-                {% endfor %}
-              </div>
-            {% else %}
-              <div class="empty-table">Create the first library to start sharing music.</div>
-            {% endif %}
-          </div>
+            <p class="share-entry-note">Anyone who knows a library URL can open that library, but this landing page does not enumerate shares.</p>
+          </section>
         </main>
       </div>
     </div>

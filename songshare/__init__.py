@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import os
+import secrets
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
+from uuid import uuid4
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .album_lookup import LookupError, MusicMetadataClient
 from .store import LibraryNotFoundError, Store, TrackNotFoundError, UploadedTrack
@@ -17,6 +20,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     data_dir = Path(os.getenv("SONGSHARE_DATA_DIR", "./songshare-data"))
     max_upload_mb = int(os.getenv("SONGSHARE_MAX_UPLOAD_MB", "512"))
+    proxy_hops = max(0, int(os.getenv("SONGSHARE_PROXY_HOPS", "0")))
     dev_mode = os.getenv("SONGSHARE_DEV", "").lower() in {"1", "true", "yes", "on"}
 
     app.config.from_mapping(
@@ -25,19 +29,41 @@ def create_app(test_config: dict | None = None) -> Flask:
         DEV_MODE=dev_mode,
         MAX_UPLOAD_MB=max_upload_mb,
         MAX_CONTENT_LENGTH=max_upload_mb * 1024 * 1024,
+        PROXY_HOPS=proxy_hops,
     )
 
     if test_config:
         app.config.update(test_config)
 
     app.config["DATA_DIR"] = Path(app.config["DATA_DIR"]).resolve()
+    app.config["DATA_DIR"].mkdir(parents=True, exist_ok=True)
     app.config["TEMPLATES_AUTO_RELOAD"] = bool(app.config["DEV_MODE"])
     if app.config["DEV_MODE"]:
         app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
+    if app.config["PROXY_HOPS"]:
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=app.config["PROXY_HOPS"],
+            x_proto=app.config["PROXY_HOPS"],
+            x_host=app.config["PROXY_HOPS"],
+            x_port=app.config["PROXY_HOPS"],
+            x_prefix=app.config["PROXY_HOPS"],
+        )
 
     store = Store(Path(app.config["DATA_DIR"]))
     app.config["STORE"] = store
     app.config.setdefault("LOOKUP_CLIENT", MusicMetadataClient())
+    owner_token_path = app.config["DATA_DIR"] / "owner-token.txt"
+    owner_token = os.getenv("SONGSHARE_OWNER_TOKEN", "").strip()
+    if not owner_token:
+        if owner_token_path.exists():
+            owner_token = owner_token_path.read_text(encoding="utf-8").strip()
+        else:
+            owner_token = str(uuid4())
+            owner_token_path.write_text(owner_token, encoding="utf-8")
+    app.config["OWNER_TOKEN"] = owner_token
+    app.config["OWNER_PATH"] = f"/owner/{owner_token}"
+    app.config["OWNER_TOKEN_PATH"] = owner_token_path
 
     monitor = None
     if app.config["DEV_MODE"]:
@@ -53,6 +79,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     def inject_dev_mode() -> dict:
         return {
             "dev_mode": bool(app.config["DEV_MODE"]),
+            "local_access_mode": is_direct_local_request(),
         }
 
     @app.template_filter("filesize")
@@ -80,6 +107,56 @@ def create_app(test_config: dict | None = None) -> Flask:
     def wants_json() -> bool:
         accept = request.headers.get("Accept", "")
         return "application/json" in accept or request.headers.get("X-Requested-With") == "fetch"
+
+    def owner_path() -> str:
+        return app.config["OWNER_PATH"]
+
+    def owner_dashboard_url() -> str:
+        return url_for("owner_home", owner_token=app.config["OWNER_TOKEN"])
+
+    def owner_token_from_request() -> str:
+        return (
+            (request.view_args or {}).get("owner_token")
+            or request.form.get("owner_token", "")
+            or request.args.get("owner_token", "")
+            or request.headers.get("X-Songshare-Owner-Token", "")
+        )
+
+    def is_direct_local_request() -> bool:
+        host = (request.host or "").split(":", 1)[0].strip().lower().strip("[]")
+        has_forwarded_headers = any(
+            request.headers.get(header)
+            for header in (
+                "X-Forwarded-For",
+                "X-Forwarded-Host",
+                "X-Forwarded-Proto",
+                "X-Forwarded-Port",
+                "X-Forwarded-Prefix",
+            )
+        )
+        return host in {"localhost", "127.0.0.1", "::1"} and not has_forwarded_headers
+
+    def require_owner_access() -> None:
+        token = owner_token_from_request().strip()
+        expected = app.config["OWNER_TOKEN"]
+        if not token or not secrets.compare_digest(token, expected):
+            abort(404)
+
+    def build_library_summaries() -> list[dict]:
+        libraries = []
+        for library in store.list_libraries():
+            libraries.append(
+                {
+                    "id": library.id,
+                    "track_count": len(library.tracks),
+                    "updated_at": library.updated_at,
+                    "share_url": f"{base_url()}{url_for('view_library', library_id=library.id)}",
+                    "browse_url": url_for("view_library", library_id=library.id),
+                    "delete_url": url_for("delete_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
+                    "files_dir": store.library_files_dir(library.id),
+                }
+            )
+        return libraries
 
     def track_url(library_id: str, track_id: str) -> str:
         return url_for("stream_track", library_id=library_id, track_id=track_id)
@@ -144,29 +221,28 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.get("/")
     def home():
-        libraries = []
-        for library in store.list_libraries():
-            libraries.append(
-                {
-                    "id": library.id,
-                    "track_count": len(library.tracks),
-                    "updated_at": library.updated_at,
-                    "share_url": f"{base_url()}{url_for('view_library', library_id=library.id)}",
-                    "browse_url": url_for("view_library", library_id=library.id),
-                    "delete_url": url_for("delete_library", library_id=library.id),
-                    "files_dir": store.library_files_dir(library.id),
-                }
-            )
-
+        if is_direct_local_request():
+            return redirect(owner_dashboard_url())
         return render_template(
             "home.html",
-            libraries=libraries,
             data_dir=app.config["DATA_DIR"],
             base_url=base_url(),
         )
 
+    @app.get("/owner/<owner_token>")
+    def owner_home(owner_token: str):
+        require_owner_access()
+        return render_template(
+            "owner_home.html",
+            libraries=build_library_summaries(),
+            data_dir=app.config["DATA_DIR"],
+            owner_token=app.config["OWNER_TOKEN"],
+            owner_path=owner_path(),
+        )
+
     @app.post("/libraries")
     def create_library():
+        require_owner_access()
         library = store.create_library()
         return redirect(
             url_for("view_library", library_id=library.id, notice="Library ready. Drop tracks into the queue.")
@@ -174,12 +250,13 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.post("/libraries/<library_id>/delete")
     def delete_library(library_id: str):
+        require_owner_access()
         try:
             store.delete_library(library_id)
         except LibraryNotFoundError:
             abort(404)
 
-        redirect_url = url_for("home")
+        redirect_url = owner_dashboard_url()
         if wants_json():
             return jsonify({"ok": True, "redirect_url": redirect_url})
         return redirect(redirect_url)
@@ -198,25 +275,12 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         album_groups = build_album_groups(library)
 
-        libraries = []
-        for item in store.list_libraries():
-            libraries.append(
-                {
-                    "id": item.id,
-                    "browse_url": url_for("view_library", library_id=item.id),
-                    "delete_url": url_for("delete_library", library_id=item.id),
-                }
-            )
-
         return render_template(
             "library.html",
             library=library,
             album_groups=album_groups,
             album_count=len(album_groups),
-            libraries=libraries,
-            other_libraries=[item for item in libraries if item["id"] != library.id],
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
-            delete_library_url=url_for("delete_library", library_id=library.id),
             library_files_dir=store.library_files_dir(library.id),
             notice=request.args.get("notice", ""),
             error=request.args.get("error", ""),

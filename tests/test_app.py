@@ -1,12 +1,34 @@
 from __future__ import annotations
 
 import io
-import tempfile
 import unittest
+import uuid
 from pathlib import Path
 
 from songshare.album_lookup import LookupCandidate
 from songshare import create_app
+
+
+def _resolve_test_tmp_root() -> Path:
+    for candidate in (
+        Path.home() / ".codex" / "memories" / "songshare-tests",
+        Path(__file__).resolve().parents[1] / ".tmp-tests",
+    ):
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate
+        except PermissionError:
+            continue
+    raise PermissionError("No writable test temp directory available.")
+
+
+TEST_TMP_ROOT = _resolve_test_tmp_root()
+
+
+def new_test_dir() -> Path:
+    path = TEST_TMP_ROOT / str(uuid.uuid4())
+    path.mkdir(parents=True, exist_ok=False)
+    return path
 
 
 class FakeLookupClient:
@@ -30,22 +52,26 @@ class FakeLookupClient:
 
 class SongshareAppTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = new_test_dir()
         self.app = create_app(
             {
                 "TESTING": True,
-                "DATA_DIR": Path(self.temp_dir.name),
+                "DATA_DIR": self.temp_dir,
                 "BASE_URL": "http://localhost:8080",
                 "LOOKUP_CLIENT": FakeLookupClient(),
             }
         )
         self.client = self.app.test_client()
+        self.owner_token = self.app.config["OWNER_TOKEN"]
+
+    def create_library(self):
+        return self.client.post(f"/libraries?owner_token={self.owner_token}", follow_redirects=False)
 
     def tearDown(self) -> None:
-        self.temp_dir.cleanup()
+        pass
 
     def test_create_library_and_upload_track(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         self.assertEqual(response.status_code, 302)
         library_path = response.headers["Location"].split("?", 1)[0]
 
@@ -64,6 +90,22 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"demo.mp3", page.data)
 
+    def test_home_does_not_enumerate_library_ids(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        page = self.client.get("/", base_url="http://music.example.com")
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn(library_id.encode(), page.data)
+        self.assertIn(b"Open a shared library", page.data)
+        self.assertIn(b"/s/12345678-1234-1234-1234-123456789abc", page.data)
+
+    def test_local_root_redirects_to_owner_dashboard(self) -> None:
+        response = self.client.get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], f"/owner/{self.owner_token}")
+
     def test_dev_reload_endpoint_enabled_in_dev_mode(self) -> None:
         app = create_app(
             {
@@ -79,7 +121,7 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn("token", response.get_json())
 
     def test_lookup_and_apply_album_info(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
 
         upload_response = self.client.post(
@@ -124,7 +166,7 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertTrue(updated_library.tracks[0].cover_art_name)
 
     def test_lookup_accepts_manual_query_overrides(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
 
         self.client.post(
@@ -150,7 +192,7 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(payload["query"]["album"], "Manual Album")
 
     def test_bulk_delete_tracks(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
 
         self.client.post(
@@ -183,24 +225,24 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(updated_library.tracks, [])
 
     def test_delete_library(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
         library_id = library_path.rsplit("/", 1)[-1]
 
         delete_response = self.client.post(
-            f"/libraries/{library_id}/delete",
+            f"/libraries/{library_id}/delete?owner_token={self.owner_token}",
             headers={"Accept": "application/json", "X-Requested-With": "fetch"},
         )
         self.assertEqual(delete_response.status_code, 200)
         payload = delete_response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["redirect_url"], "/")
+        self.assertEqual(payload["redirect_url"], f"/owner/{self.owner_token}")
 
         with self.assertRaises(FileNotFoundError):
             self.app.config["STORE"].get_library(library_id)
 
     def test_album_view_renders(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
 
         self.client.post(
@@ -215,9 +257,21 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"Albums", page.data)
         self.assertIn(b"album-browser", page.data)
         self.assertIn(b"data-album-browse-url", page.data)
+        self.assertIn(b"data-search=", page.data)
+
+    def test_library_page_renders_drawer_import_controls(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        page = self.client.get(library_path)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"drawer-import-button", page.data)
+        self.assertIn(b"data-hidden-file-input", page.data)
+        self.assertIn(b"data-hidden-directory-input", page.data)
+        self.assertIn(b"toggle-library-drawer", page.data)
 
     def test_track_view_marks_target_album_section(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
 
         self.client.post(
@@ -233,8 +287,35 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"data-target-album-section", page.data)
         self.assertIn(b"is-target-album", page.data)
 
+    def test_library_view_renders_drawer_import_controls(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        page = self.client.get(library_path)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"drawer-handle-button", page.data)
+        self.assertIn(b"drawer-import-actions", page.data)
+        self.assertIn(b"Search tracks and albums", page.data)
+        self.assertIn(b"data-upload-status-shell", page.data)
+
+    def test_library_view_does_not_expose_other_library_ids(self) -> None:
+        first_response = self.create_library()
+        first_library_path = first_response.headers["Location"].split("?", 1)[0]
+        first_library_id = first_library_path.rsplit("/", 1)[-1]
+
+        second_response = self.create_library()
+        second_library_path = second_response.headers["Location"].split("?", 1)[0]
+        second_library_id = second_library_path.rsplit("/", 1)[-1]
+
+        page = self.client.get(first_library_path)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(first_library_id[:8].encode(), page.data)
+        self.assertNotIn(second_library_id.encode(), page.data)
+        self.assertNotIn(second_library_id[:8].encode(), page.data)
+        self.assertNotIn(b"Other libraries", page.data)
+
     def test_inline_rating_endpoint_updates_track(self) -> None:
-        response = self.client.post("/libraries", follow_redirects=False)
+        response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
 
         self.client.post(
@@ -260,6 +341,51 @@ class SongshareAppTestCase(unittest.TestCase):
 
         updated_library = self.app.config["STORE"].get_library(library_id)
         self.assertEqual(updated_library.tracks[0].rating, 5)
+
+    def test_owner_dashboard_uses_forwarded_https_headers_for_share_links(self) -> None:
+        app = create_app(
+            {
+                "TESTING": True,
+                "DATA_DIR": self.temp_dir,
+                "PROXY_HOPS": 1,
+                "LOOKUP_CLIENT": FakeLookupClient(),
+            }
+        )
+        client = app.test_client()
+        owner_token = app.config["OWNER_TOKEN"]
+
+        client.post(
+            f"/libraries?owner_token={owner_token}",
+            follow_redirects=False,
+            base_url="http://127.0.0.1:8080",
+            headers={
+                "Host": "127.0.0.1:8080",
+                "X-Forwarded-Host": "music.example.com",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Port": "443",
+            },
+        )
+
+        page = client.get(
+            f"/owner/{owner_token}",
+            base_url="http://127.0.0.1:8080",
+            headers={
+                "Host": "127.0.0.1:8080",
+                "X-Forwarded-Host": "music.example.com",
+                "X-Forwarded-Proto": "https",
+                "X-Forwarded-Port": "443",
+            },
+        )
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"https://music.example.com/s/", page.data)
+
+    def test_owner_dashboard_requires_secret_token(self) -> None:
+        response = self.client.get("/owner/not-the-right-token")
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_library_requires_owner_token(self) -> None:
+        response = self.client.post("/libraries", follow_redirects=False)
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

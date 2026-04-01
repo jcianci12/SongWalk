@@ -1,0 +1,7 @@
+services:
+  songshare:
+    environment:
+      SONGSHARE_DEV: "1"
+    volumes:
+      - ./songshare:/app/songshare
+      - ./songshare-data:/data

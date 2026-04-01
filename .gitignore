@@ -3,5 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+.tmp-tests/
+*.log
 songshare-data/
-
+/*-*-*-*-*/

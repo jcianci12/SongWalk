@@ -190,18 +190,22 @@
   const hiddenDirectoryInput = document.querySelector("[data-hidden-directory-input]");
   if (uploadForm && hiddenFileInput) {
     const dropzone = uploadForm.querySelector("[data-dropzone]");
-    const statusLine = uploadForm.querySelector("[data-upload-status]");
-    const uploadProgress = uploadForm.querySelector("[data-upload-progress]");
-    const uploadProgressBar = uploadForm.querySelector("[data-upload-progress-bar]");
-    const uploadProgressCopy = uploadForm.querySelector("[data-upload-progress-copy]");
+    const uploadStatusShell = document.querySelector("[data-upload-status-shell]");
+    const statusLine = document.querySelector("[data-upload-status]");
+    const uploadProgress = document.querySelector("[data-upload-progress]");
+    const uploadProgressBar = document.querySelector("[data-upload-progress-bar]");
+    const uploadProgressCopy = document.querySelector("[data-upload-progress-copy]");
     const windowDropOverlay = document.getElementById("window-drop-overlay");
     let windowDragDepth = 0;
 
     function setUploadState(message, active) {
       if (statusLine) {
-        statusLine.textContent = message;
+        statusLine.textContent = message || "";
       }
       uploadForm.classList.toggle("is-busy", Boolean(active));
+      if (uploadStatusShell) {
+        uploadStatusShell.hidden = !active;
+      }
     }
 
     function setUploadProgress(loaded, total) {
@@ -225,6 +229,11 @@
       uploadProgress.hidden = true;
       uploadProgressBar.style.width = "0%";
       uploadProgressCopy.textContent = "0%";
+    }
+
+    function clearUploadState() {
+      setUploadState("", false);
+      resetUploadProgress();
     }
 
     function showWindowDropOverlay() {
@@ -366,13 +375,17 @@
           return;
         }
 
-        setUploadState(payload.error || (payload.errors && payload.errors[0]) || "Upload failed.", false);
+        clearUploadState();
+        window.alert(payload.error || (payload.errors && payload.errors[0]) || "Upload failed.");
       } catch (error) {
-        setUploadState(error instanceof Error ? error.message : "Upload failed.", false);
+        clearUploadState();
+        window.alert(error instanceof Error ? error.message : "Upload failed.");
       } finally {
         windowDragDepth = 0;
         hideWindowDropOverlay();
-        resetUploadProgress();
+        if (!uploadStatusShell || uploadStatusShell.hidden) {
+          clearUploadState();
+        }
       }
     }
 
@@ -471,6 +484,9 @@
   const toggleSelectionPanelButton = document.getElementById("toggle-selection-panel");
   const toggleSelectionTitle = document.getElementById("toggle-selection-title");
   const toggleSelectionMeta = document.getElementById("toggle-selection-meta");
+  const libraryDrawer = document.getElementById("library-navigation");
+  const toggleLibraryDrawerButton = document.getElementById("toggle-library-drawer");
+  const libraryDrawerScrim = document.getElementById("library-drawer-scrim");
   const editForm = document.querySelector("[data-editor-form]");
   const editorAccordion = document.getElementById("editor-accordion");
   const toggleEditorButton = document.getElementById("toggle-editor");
@@ -507,6 +523,36 @@
 
   function visibleRows() {
     return rows.filter((row) => !row.hidden);
+  }
+
+  function syncSelectionToVisibleRows() {
+    const visible = visibleRows();
+    const visibleSet = new Set(visible);
+
+    selectedRows = selectedRows.filter((row) => visibleSet.has(row));
+    if (selectedRow && !visibleSet.has(selectedRow)) {
+      selectedRow = null;
+    }
+
+    if (!selectedRow && selectedRows.length) {
+      selectedRow = selectedRows[selectedRows.length - 1];
+    }
+
+    if (!selectedRow && visible.length) {
+      selectedRow = visible[0];
+      selectedRows = [selectedRow];
+    }
+
+    if (selectedRow && !selectedRows.length) {
+      selectedRows = [selectedRow];
+    }
+
+    if (!visible.length) {
+      selectedRow = null;
+      selectedRows = [];
+    }
+
+    renderSelection(false);
   }
 
   function selectedTrackIds() {
@@ -657,6 +703,23 @@
     if (toggleSelectionMeta) {
       toggleSelectionMeta.textContent = meta || "Choose a row to view details, edit metadata, or delete it.";
     }
+  }
+
+  function hasLibraryDrawerControls() {
+    return Boolean(libraryDrawer && toggleLibraryDrawerButton && libraryDrawerScrim);
+  }
+
+  function setLibraryDrawerOpen(open) {
+    if (!hasLibraryDrawerControls()) {
+      return;
+    }
+
+    const isOpen = Boolean(open);
+    libraryDrawer.classList.toggle("is-open", isOpen);
+    libraryDrawerScrim.hidden = !isOpen;
+    libraryDrawerScrim.classList.toggle("is-open", isOpen);
+    toggleLibraryDrawerButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    document.body.classList.toggle("is-library-drawer-open", isOpen);
   }
 
   function renderMultiSelection() {
@@ -1112,9 +1175,25 @@
     });
   }
 
+  if (hasLibraryDrawerControls()) {
+    setLibraryDrawerOpen(false);
+  }
+
   document.addEventListener("click", (event) => {
     if (contextMenu && !contextMenu.hidden && !contextMenu.contains(event.target)) {
       hideContextMenu();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    hideContextMenu();
+    if (toggleLibraryDrawerButton && toggleLibraryDrawerButton.getAttribute("aria-expanded") === "true") {
+      setLibraryDrawerOpen(false);
+      toggleLibraryDrawerButton.focus();
     }
   });
 
@@ -1140,6 +1219,25 @@
     toggleSelectionPanelButton.addEventListener("click", () => {
       const isOpen = toggleSelectionPanelButton.getAttribute("aria-expanded") === "true";
       setTransportSelectionOpen(!isOpen);
+    });
+  }
+
+  if (toggleLibraryDrawerButton) {
+    toggleLibraryDrawerButton.addEventListener("click", () => {
+      const isOpen = toggleLibraryDrawerButton.getAttribute("aria-expanded") === "true";
+      setLibraryDrawerOpen(!isOpen);
+      if (!isOpen && libraryDrawer) {
+        libraryDrawer.focus();
+      }
+    });
+  }
+
+  if (libraryDrawerScrim) {
+    libraryDrawerScrim.addEventListener("click", () => {
+      setLibraryDrawerOpen(false);
+      if (toggleLibraryDrawerButton) {
+        toggleLibraryDrawerButton.focus();
+      }
     });
   }
 
@@ -1190,10 +1288,19 @@
         row.hidden = Boolean(query) && !haystack.includes(query);
       });
 
-      albumContainers.forEach((container) => {
-        const hasVisibleRows = Array.from(container.querySelectorAll("[data-track-row]")).some((row) => !row.hidden);
-        container.hidden = !hasVisibleRows;
+      albumCards.forEach((card) => {
+        const haystack = (card.getAttribute("data-search") || "").toLowerCase();
+        card.hidden = Boolean(query) && !haystack.includes(query);
       });
+
+      albumContainers
+        .filter((container) => !container.hasAttribute("data-album-card"))
+        .forEach((container) => {
+          const hasVisibleRows = Array.from(container.querySelectorAll("[data-track-row]")).some((row) => !row.hidden);
+          container.hidden = !hasVisibleRows;
+        });
+
+      syncSelectionToVisibleRows();
     });
   }
 

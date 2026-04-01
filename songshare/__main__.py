@@ -13,6 +13,23 @@ def main() -> None:
     host = os.getenv("SONGSHARE_HOST", "0.0.0.0")
     port = int(os.getenv("SONGSHARE_PORT", "8080"))
     dev_mode = os.getenv("SONGSHARE_DEV", "").lower() in {"1", "true", "yes", "on"}
+    local_owner_url = f"http://localhost:{port}{app.config['OWNER_PATH']}"
+    owner_url_path = Path(app.config["DATA_DIR"]) / "owner-url.txt"
+    owner_url_path.write_text(
+        "\n".join(
+            [
+                "Songshare owner dashboard",
+                local_owner_url,
+                "",
+                "If you are using a public tunnel or reverse proxy, append this private path to that host instead:",
+                app.config["OWNER_PATH"],
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"Songshare owner dashboard: {local_owner_url}", flush=True)
+    print(f"Songshare owner URL file: {owner_url_path}", flush=True)
 
     if dev_mode:
         app.run(

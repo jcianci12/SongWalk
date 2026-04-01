@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import shutil
+import stat
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -151,7 +154,7 @@ class Store:
             library_dir = self._library_dir(library_id)
             if not library_dir.exists() or not library_dir.is_dir():
                 raise LibraryNotFoundError(library_id)
-            shutil.rmtree(library_dir)
+            _rmtree_with_retries(library_dir)
 
     def get_library(self, library_id: str) -> Library:
         library_path = self._library_json_path(library_id)
@@ -313,11 +316,11 @@ class Store:
             for track in tracks_to_remove:
                 file_path = self.library_files_dir(library_id) / track.stored_name
                 if file_path.exists():
-                    file_path.unlink()
+                    _unlink_with_retries(file_path)
                 if track.cover_art_name:
                     cover_path = self.library_covers_dir(library_id) / track.cover_art_name
                     if cover_path.exists():
-                        cover_path.unlink()
+                        _unlink_with_retries(cover_path)
 
             return len(tracks_to_remove)
 
@@ -353,9 +356,9 @@ class Store:
     def _write_library(self, library: Library) -> None:
         library_dir = self._library_dir(library.id)
         library_dir.mkdir(parents=True, exist_ok=True)
-        temp_path = self._library_json_path(library.id).with_suffix(".json.tmp")
-        temp_path.write_text(json.dumps(library.to_dict(), indent=2), encoding="utf-8")
-        temp_path.replace(self._library_json_path(library.id))
+        target_path = self._library_json_path(library.id)
+        payload = json.dumps(library.to_dict(), indent=2)
+        target_path.write_text(payload, encoding="utf-8")
 
     def _write_cover_art(
         self,
@@ -383,3 +386,49 @@ class Store:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _unlink_with_retries(path: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:
+    last_error: PermissionError | None = None
+    for _ in range(attempts):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            try:
+                os.chmod(path, stat.S_IWRITE)
+            except OSError:
+                pass
+            time.sleep(delay_seconds)
+    if last_error is not None:
+        raise last_error
+
+
+def _rmtree_with_retries(path: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:
+    last_error: PermissionError | None = None
+
+    def on_error(_func, failed_path, exc_info):
+        nonlocal last_error
+        error = exc_info[1]
+        if isinstance(error, PermissionError):
+            last_error = error
+            try:
+                os.chmod(failed_path, stat.S_IWRITE)
+            except OSError:
+                pass
+            raise error
+        raise error
+
+    for _ in range(attempts):
+        try:
+            shutil.rmtree(path, onerror=on_error)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(delay_seconds)
+
+    if last_error is not None:
+        raise last_error

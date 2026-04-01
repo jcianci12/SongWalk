@@ -11,24 +11,24 @@
     <div class="wmp-window">
       <header class="title-band">
         <div class="title-band-left">
-          <span class="app-mark">Songshare</span>
+          <span class="app-mark" href="{{ url_for('home') }}">Songshare</span> 
+          {% if local_access_mode %}
+            <span class="local-access-badge" title="Direct local access">🖥️ Local</span>
+          {% endif %}
           <span class="crumbs">Library &gt; Music &gt; {{ library.id[:8] }}</span>
         </div>
         <div class="title-actions">
-          <a class="frame-button" href="{{ url_for('home') }}">All libraries</a>
+          <div class="title-upload-status" data-upload-status-shell hidden>
+            <p class="status-line title-upload-copy" data-upload-status>Uploading tracks...</p>
+            <div class="upload-progress title-upload-progress" data-upload-progress hidden>
+              <div class="upload-progress-track">
+                <div class="upload-progress-bar" data-upload-progress-bar></div>
+              </div>
+              <span class="upload-progress-copy" data-upload-progress-copy>0%</span>
+            </div>
+          </div>
+          <a class="frame-button" href="{{ url_for('home') }}">Share access</a>
           <button type="button" class="frame-button" data-copy="{{ share_url }}">Copy share link</button>
-          <form
-            action="{{ delete_library_url }}"
-            method="post"
-            class="inline-icon-form"
-            data-delete-library-form
-            data-library-label="{{ library.id }}"
-            data-redirect-url="{{ url_for('home') }}"
-          >
-            <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ library.id }}" title="Delete library">
-              &#128465;
-            </button>
-          </form>
         </div>
       </header>
 
@@ -36,56 +36,61 @@
         <div class="menu-links">
           <span>Import tracks, search, play, and edit metadata for this shared library.</span>
         </div>
-        <div class="command-actions">
-          <label class="frame-button">
-            Import files
-            <input type="file" name="tracks" multiple accept=".aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,.wma,audio/*" data-hidden-file-input>
-          </label>
-          <label class="frame-button">
-            Import folder
-            <input type="file" name="tracks-folder" webkitdirectory directory multiple data-hidden-directory-input>
-          </label>
-        </div>
       </div>
-
       <div class="workspace">
-        <aside class="nav-pane">
+        <aside class="nav-pane" id="library-navigation" tabindex="-1">
           <div class="nav-group">
             <p class="nav-title">Library</p>
-            <a class="nav-item" href="{{ url_for('home') }}">All music</a>
+            <a class="nav-item" href="{{ url_for('home') }}">Open by share URL</a>
             <span class="nav-item is-active">{{ library.id[:8] }}</span>
           </div>
           <div class="nav-group">
-            <p class="nav-title">Other libraries</p>
-            {% if other_libraries %}
-              {% for item in other_libraries %}
-                <div class="nav-item-row">
-                  <a class="nav-item" href="{{ item.browse_url }}">{{ item.id[:8] }}</a>
-                  <form
-                    action="{{ item.delete_url }}"
-                    method="post"
-                    class="inline-icon-form"
-                    data-delete-library-form
-                    data-library-label="{{ item.id[:8] }}"
-                    data-redirect-url="{{ url_for('home') }}"
-                  >
-                    <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ item.id[:8] }}" title="Delete library">
-                      &#128465;
-                    </button>
-                  </form>
-                </div>
-              {% endfor %}
-            {% else %}
-              <span class="nav-item muted">No other libraries</span>
-            {% endif %}
+            <p class="nav-title">Import</p>
+            <form
+              action="{{ url_for('upload_tracks', library_id=library.id) }}"
+              method="post"
+              enctype="multipart/form-data"
+              class="upload-tray drawer-upload-tray"
+              data-upload-form
+            >
+              <div class="drawer-import-actions">
+                <label class="frame-button drawer-import-button">
+                  Import files
+                  <input type="file" name="tracks" multiple accept=".aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,.wma,audio/*" data-hidden-file-input>
+                </label>
+                <label class="frame-button drawer-import-button">
+                  Import folder
+                  <input type="file" name="tracks-folder" webkitdirectory directory multiple data-hidden-directory-input>
+                </label>
+              </div>
+              <label class="upload-prompt" data-dropzone>
+                <span>Drop files here, or import them from this drawer.</span>
+                <small>{{ library_files_dir }}</small>
+              </label>
+            </form>
           </div>
         </aside>
 
         <main class="content-pane">
           <div class="view-band">
-            <div>
-              <p class="view-caption">All music</p>
-              <h1>{{ library.id }}</h1>
+            <div class="view-band-main">
+              <div class="drawer-handle-row">
+                <button
+                  type="button"
+                  class="drawer-handle-button"
+                  id="toggle-library-drawer"
+                  aria-controls="library-navigation"
+                  aria-expanded="false"
+                  aria-label="Open library drawer"
+                  title="Open library drawer"
+                >
+                  <span aria-hidden="true">&#9881;</span>
+                </button>
+                <div>
+                  <p class="view-caption">All music</p>
+                  <h1>{{ library.id }}</h1>
+                </div>
+              </div>
             </div>
             <div class="view-band-actions">
               <div class="view-switcher">
@@ -93,7 +98,7 @@
                 <a class="frame-button{% if view_mode == 'albums' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='albums') }}">Albums</a>
               </div>
               <div class="search-stack">
-                <input type="search" placeholder="Search" data-track-filter>
+                <input type="search" placeholder="Search tracks and albums" data-track-filter>
                 <span class="view-meta">
                   {% if view_mode == 'albums' %}
                     {{ album_count }} album{% if album_count != 1 %}s{% endif %}
@@ -104,26 +109,6 @@
               </div>
             </div>
           </div>
-
-          <form
-            action="{{ url_for('upload_tracks', library_id=library.id) }}"
-            method="post"
-            enctype="multipart/form-data"
-            class="upload-tray"
-            data-upload-form
-          >
-            <label class="upload-prompt" data-dropzone>
-              <span>Drop files or folders anywhere into this library, or use Import files / Import folder.</span>
-              <small>{{ library_files_dir }}</small>
-            </label>
-            <p class="status-line" data-upload-status></p>
-            <div class="upload-progress" data-upload-progress>
-              <div class="upload-progress-track">
-                <div class="upload-progress-bar" data-upload-progress-bar></div>
-              </div>
-              <span class="upload-progress-copy" data-upload-progress-copy>0%</span>
-            </div>
-          </form>
 
           {% if notice %}
             <div class="flash notice">{{ notice }}</div>
@@ -141,6 +126,7 @@
                       class="album-cover-card"
                       data-album-container
                       data-album-card
+                      data-search="{{ group.search_value|lower }}"
                       data-album-primary-track-id="{{ group.tracks[0].id }}"
                       data-album-browse-url="{{ url_for('view_library', library_id=library.id, view='tracks', album=group.key) }}"
                       role="button"
@@ -211,6 +197,7 @@
                       class="album-section{% if selected_album_key and selected_album_key == group.key %} is-target-album{% endif %}"
                       data-album-section
                       data-album-container
+                      data-search="{{ group.search_value|lower }}"
                       data-album-key="{{ group.key }}"
                       {% if selected_album_key and selected_album_key == group.key %}data-target-album-section{% endif %}
                     >
@@ -360,6 +347,7 @@
           </section>
         </main>
       </div>
+      <div class="library-drawer-scrim" id="library-drawer-scrim" hidden></div>
     </div>
 
     <div class="context-menu" id="track-context-menu" hidden>

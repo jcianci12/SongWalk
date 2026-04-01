@@ -4,7 +4,9 @@ Songshare is a small self-hosted music dropbox with a shared UUID link per libra
 
 ## Share First
 
-Songshare is built around one idea: create a library, copy its share URL, and send it to someone immediately.
+Songshare is built around one idea: EASILY spin it up, create a library, copy its share URL, and send it to someone immediately.
+
+Really easy to use. Run the included scripts (quick-share.ps1) and you will have a public facing url in no time that you can share with friends! Python or docker is needed. (future feature one simple exe to run perhaps?)
 
 - Anyone with the share URL can open that library.
 - Anyone with the share URL can upload tracks and edit metadata in that library.

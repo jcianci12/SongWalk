@@ -87,6 +87,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     def cover_url(library_id: str, cover_art_name: str) -> str:
         return url_for("track_cover_art", library_id=library_id, cover_art_name=cover_art_name)
 
+    def album_group_key(album_name: str, artist_name: str) -> str:
+        return f"{album_name.strip().lower()}::{artist_name.strip().lower()}"
+
     def build_album_groups(library):
         groups: OrderedDict[tuple[str, str], dict] = OrderedDict()
 
@@ -97,6 +100,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
             if key not in groups:
                 groups[key] = {
+                    "key": album_group_key(album_name, artist_name),
                     "name": album_name,
                     "artist": artist_name,
                     "cover_initials": cover_initials(album_name),
@@ -149,6 +153,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "updated_at": library.updated_at,
                     "share_url": f"{base_url()}{url_for('view_library', library_id=library.id)}",
                     "browse_url": url_for("view_library", library_id=library.id),
+                    "delete_url": url_for("delete_library", library_id=library.id),
                     "files_dir": store.library_files_dir(library.id),
                 }
             )
@@ -167,6 +172,18 @@ def create_app(test_config: dict | None = None) -> Flask:
             url_for("view_library", library_id=library.id, notice="Library ready. Drop tracks into the queue.")
         )
 
+    @app.post("/libraries/<library_id>/delete")
+    def delete_library(library_id: str):
+        try:
+            store.delete_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        redirect_url = url_for("home")
+        if wants_json():
+            return jsonify({"ok": True, "redirect_url": redirect_url})
+        return redirect(redirect_url)
+
     @app.get("/s/<library_id>")
     def view_library(library_id: str):
         try:
@@ -177,6 +194,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         view_mode = request.args.get("view", "tracks").strip().lower()
         if view_mode not in {"tracks", "albums"}:
             view_mode = "tracks"
+        selected_album_key = request.args.get("album", "").strip().lower()
 
         album_groups = build_album_groups(library)
 
@@ -186,6 +204,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 {
                     "id": item.id,
                     "browse_url": url_for("view_library", library_id=item.id),
+                    "delete_url": url_for("delete_library", library_id=item.id),
                 }
             )
 
@@ -197,10 +216,12 @@ def create_app(test_config: dict | None = None) -> Flask:
             libraries=libraries,
             other_libraries=[item for item in libraries if item["id"] != library.id],
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
+            delete_library_url=url_for("delete_library", library_id=library.id),
             library_files_dir=store.library_files_dir(library.id),
             notice=request.args.get("notice", ""),
             error=request.args.get("error", ""),
             view_mode=view_mode,
+            selected_album_key=selected_album_key,
             track_url=track_url,
         )
 

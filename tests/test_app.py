@@ -182,6 +182,23 @@ class SongshareAppTestCase(unittest.TestCase):
         updated_library = self.app.config["STORE"].get_library(library_id)
         self.assertEqual(updated_library.tracks, [])
 
+    def test_delete_library(self) -> None:
+        response = self.client.post("/libraries", follow_redirects=False)
+        library_path = response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        delete_response = self.client.post(
+            f"/libraries/{library_id}/delete",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        payload = delete_response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["redirect_url"], "/")
+
+        with self.assertRaises(FileNotFoundError):
+            self.app.config["STORE"].get_library(library_id)
+
     def test_album_view_renders(self) -> None:
         response = self.client.post("/libraries", follow_redirects=False)
         library_path = response.headers["Location"].split("?", 1)[0]
@@ -197,6 +214,24 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"Albums", page.data)
         self.assertIn(b"album-browser", page.data)
+        self.assertIn(b"data-album-browse-url", page.data)
+
+    def test_track_view_marks_target_album_section(self) -> None:
+        response = self.client.post("/libraries", follow_redirects=False)
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={"tracks": (io.BytesIO(b"ID3-demo-track"), "demo.mp3")},
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        target_key = "unknown album::unknown artist"
+        page = self.client.get(f"{library_path}?view=tracks&album={target_key}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"data-target-album-section", page.data)
+        self.assertIn(b"is-target-album", page.data)
 
     def test_inline_rating_endpoint_updates_track(self) -> None:
         response = self.client.post("/libraries", follow_redirects=False)

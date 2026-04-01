@@ -41,7 +41,21 @@
             <p class="nav-title">Shared libraries</p>
             {% if libraries %}
               {% for library in libraries %}
-                <a class="nav-item" href="{{ library.browse_url }}">{{ library.id[:8] }}</a>
+                <div class="nav-item-row">
+                  <a class="nav-item" href="{{ library.browse_url }}">{{ library.id[:8] }}</a>
+                  <form
+                    action="{{ library.delete_url }}"
+                    method="post"
+                    class="inline-icon-form"
+                    data-delete-library-form
+                    data-library-label="{{ library.id[:8] }}"
+                    data-redirect-url="{{ url_for('home') }}"
+                  >
+                    <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ library.id[:8] }}" title="Delete library">
+                      &#128465;
+                    </button>
+                  </form>
+                </div>
               {% endfor %}
             {% else %}
               <span class="nav-item muted">No shares yet</span>
@@ -85,6 +99,18 @@
                     <div class="row-actions">
                       <a class="row-link" href="{{ library.browse_url }}">Open</a>
                       <button type="button" class="row-link" data-copy="{{ library.share_url }}">Copy link</button>
+                      <form
+                        action="{{ library.delete_url }}"
+                        method="post"
+                        class="inline-icon-form"
+                        data-delete-library-form
+                        data-library-label="{{ library.id }}"
+                        data-redirect-url="{{ url_for('home') }}"
+                      >
+                        <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ library.id }}" title="Delete library">
+                          &#128465;
+                        </button>
+                      </form>
                     </div>
                   </div>
                 {% endfor %}

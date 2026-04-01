@@ -146,6 +146,13 @@ class Store:
                 return library
         raise RuntimeError("unable to allocate library id")
 
+    def delete_library(self, library_id: str) -> None:
+        with self._lock:
+            library_dir = self._library_dir(library_id)
+            if not library_dir.exists() or not library_dir.is_dir():
+                raise LibraryNotFoundError(library_id)
+            shutil.rmtree(library_dir)
+
     def get_library(self, library_id: str) -> Library:
         library_path = self._library_json_path(library_id)
         if not library_path.exists():

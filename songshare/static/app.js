@@ -130,6 +130,46 @@
     });
   });
 
+  document.querySelectorAll("[data-delete-library-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const libraryLabel = form.getAttribute("data-library-label") || "this library";
+      if (!window.confirm(`Delete library ${libraryLabel}? This removes all tracks and cover art in it.`)) {
+        return;
+      }
+
+      try {
+        const { response, payload } = await withGlobalBusy("Deleting library...", async () => {
+          const response = await fetch(form.action, {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "X-Requested-With": "fetch",
+            },
+          });
+
+          let payload = {};
+          try {
+            payload = await response.json();
+          } catch (_) {
+            payload = {};
+          }
+
+          return { response, payload };
+        });
+
+        if (!response.ok || !payload.ok) {
+          throw new Error((payload && payload.error) || "Could not delete library.");
+        }
+
+        window.location.href = payload.redirect_url || form.getAttribute("data-redirect-url") || "/";
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Could not delete library.");
+      }
+    });
+  });
+
   const openShareForm = document.querySelector("[data-open-share]");
   if (openShareForm) {
     openShareForm.addEventListener("submit", (event) => {
@@ -422,10 +462,15 @@
 
   const rows = Array.from(document.querySelectorAll("[data-track-row]"));
   const albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
+  const albumCards = Array.from(document.querySelectorAll("[data-album-card]"));
   const player = document.getElementById("deck-player");
   const titleTarget = document.getElementById("now-playing-title");
   const metaTarget = document.getElementById("now-playing-meta");
   const artTarget = document.getElementById("selection-art");
+  const transportSelectionPanel = document.getElementById("transport-selection-panel");
+  const toggleSelectionPanelButton = document.getElementById("toggle-selection-panel");
+  const toggleSelectionTitle = document.getElementById("toggle-selection-title");
+  const toggleSelectionMeta = document.getElementById("toggle-selection-meta");
   const editForm = document.querySelector("[data-editor-form]");
   const editorAccordion = document.getElementById("editor-accordion");
   const toggleEditorButton = document.getElementById("toggle-editor");
@@ -454,6 +499,7 @@
   const lookupAlbumInput = document.getElementById("lookup-album");
   const lookupSearchButton = document.getElementById("lookup-search-button");
   const bulkDeleteUrl = deleteButton ? (deleteButton.getAttribute("data-bulk-delete-url") || "") : "";
+  const targetAlbumSection = document.querySelector("[data-target-album-section]");
 
   let selectedRow = null;
   let selectedRows = [];
@@ -579,13 +625,50 @@
       row.classList.toggle("is-selected", isSelected);
       row.classList.toggle("is-primary-selected", row === selectedRow);
     });
+
+    albumCards.forEach((card) => {
+      const browseUrl = card.getAttribute("data-album-browse-url");
+      if (browseUrl) {
+        card.classList.remove("is-selected");
+        return;
+      }
+
+      const primaryTrackId = card.getAttribute("data-album-primary-track-id");
+      const isSelected = Boolean(selectedRow) && selectedRow.getAttribute("data-track-id") === primaryTrackId;
+      card.classList.toggle("is-selected", isSelected);
+    });
+  }
+
+  function setTransportSelectionOpen(open) {
+    if (!transportSelectionPanel || !toggleSelectionPanelButton) {
+      return;
+    }
+
+    const isOpen = Boolean(open);
+    transportSelectionPanel.classList.toggle("is-open", isOpen);
+    toggleSelectionPanelButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+
+  function setTransportSelectionSummary(title, meta) {
+    if (toggleSelectionTitle) {
+      toggleSelectionTitle.textContent = title || "Select a track";
+    }
+
+    if (toggleSelectionMeta) {
+      toggleSelectionMeta.textContent = meta || "Choose a row to view details, edit metadata, or delete it.";
+    }
   }
 
   function renderMultiSelection() {
     titleTarget.textContent = `${selectedRows.length} tracks selected`;
     metaTarget.textContent = "Ctrl/Cmd click adds or removes tracks. Delete removes the whole selection.";
+    setTransportSelectionSummary(
+      `${selectedRows.length} tracks selected`,
+      "Open to review the selection state or delete the selected tracks.",
+    );
     setArtFrame(artTarget, "", String(selectedRows.length));
     setEditorAccordionOpen(false);
+    setTransportSelectionOpen(false);
 
     if (titleInput) {
       titleInput.value = "";
@@ -633,6 +716,7 @@
 
     titleTarget.textContent = title;
     metaTarget.textContent = `${artist} - ${album} - ${filename}`;
+    setTransportSelectionSummary(title, `${artist} - ${album}`);
     setArtFrame(artTarget, coverUrl, coverInitials);
 
     titleInput.value = title;
@@ -675,11 +759,13 @@
       if (metaTarget) {
         metaTarget.textContent = "Choose a row to edit metadata or play it from the transport bar.";
       }
+      setTransportSelectionSummary("Select a track", "Choose a row to view details, edit metadata, or delete it.");
       setArtFrame(artTarget, "", "SS");
       if (ratingInput) {
         ratingInput.value = "0";
       }
       setEditorAccordionOpen(false);
+      setTransportSelectionOpen(false);
       if (deleteButton) {
         deleteButton.textContent = "Delete";
       }
@@ -980,9 +1066,50 @@
       });
     });
 
+    albumCards.forEach((card) => {
+      card.addEventListener("click", () => {
+        const browseUrl = card.getAttribute("data-album-browse-url");
+        if (browseUrl) {
+          window.location.href = browseUrl;
+          return;
+        }
+
+        const primaryTrackId = card.getAttribute("data-album-primary-track-id");
+        const row = rows.find((item) => item.getAttribute("data-track-id") === primaryTrackId);
+        if (row) {
+          selectRow(row, false);
+        }
+      });
+
+      card.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+
+        event.preventDefault();
+        const browseUrl = card.getAttribute("data-album-browse-url");
+        if (browseUrl) {
+          window.location.href = browseUrl;
+          return;
+        }
+
+        const primaryTrackId = card.getAttribute("data-album-primary-track-id");
+        const row = rows.find((item) => item.getAttribute("data-track-id") === primaryTrackId);
+        if (row) {
+          selectRow(row, false);
+        }
+      });
+    });
+
     selectRow(rows[0], false);
   } else {
     setEditorEnabled(false);
+  }
+
+  if (targetAlbumSection) {
+    window.requestAnimationFrame(() => {
+      targetAlbumSection.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
   }
 
   document.addEventListener("click", (event) => {
@@ -1007,6 +1134,13 @@
 
   if (lookupSearchButton) {
     lookupSearchButton.addEventListener("click", runLookupSearch);
+  }
+
+  if (toggleSelectionPanelButton) {
+    toggleSelectionPanelButton.addEventListener("click", () => {
+      const isOpen = toggleSelectionPanelButton.getAttribute("aria-expanded") === "true";
+      setTransportSelectionOpen(!isOpen);
+    });
   }
 
   [lookupTitleInput, lookupArtistInput, lookupAlbumInput]

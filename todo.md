@@ -1,0 +1,1 @@
+bottom bar should have shuffle, repeat play buttons

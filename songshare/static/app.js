@@ -516,6 +516,7 @@
   const lookupSearchButton = document.getElementById("lookup-search-button");
   const bulkDeleteUrl = deleteButton ? (deleteButton.getAttribute("data-bulk-delete-url") || "") : "";
   const targetAlbumSection = document.querySelector("[data-target-album-section]");
+  const mediaSession = typeof navigator !== "undefined" ? navigator.mediaSession : null;
 
   let selectedRow = null;
   let selectedRows = [];
@@ -523,6 +524,175 @@
 
   function visibleRows() {
     return rows.filter((row) => !row.hidden);
+  }
+
+  function resolveMediaUrl(value) {
+    const source = (value || "").trim();
+    if (!source) {
+      return "";
+    }
+
+    try {
+      return new URL(source, window.location.href).href;
+    } catch (_) {
+      return source;
+    }
+  }
+
+  function rowSourceUrl(row) {
+    const track = trackStateFromRow(row);
+    return track ? track.resolvedSourceUrl : "";
+  }
+
+  function currentPlaybackRow() {
+    const currentSrc = player ? resolveMediaUrl(player.currentSrc || player.getAttribute("src")) : "";
+    if (!currentSrc) {
+      return selectedRows.length === 1 ? selectedRow : null;
+    }
+
+    return rows.find((row) => rowSourceUrl(row) === currentSrc) || (selectedRows.length === 1 ? selectedRow : null);
+  }
+
+  function trackStateFromRow(row) {
+    if (!row) {
+      return null;
+    }
+
+    const dataset = row.dataset || {};
+    const title = dataset.trackTitle || dataset.trackFilename || "Selected track";
+    const artist = dataset.trackArtist || "";
+    const album = dataset.trackAlbum || "";
+
+    return {
+      id: dataset.trackId || "",
+      title,
+      artist,
+      album,
+      filename: dataset.trackFilename || "",
+      rating: normalizeRating(dataset.trackRating),
+      sourceUrl: dataset.trackSrc || "",
+      resolvedSourceUrl: resolveMediaUrl(dataset.trackSrc || ""),
+      coverUrl: resolveMediaUrl(dataset.trackCoverUrl || ""),
+      coverInitials: dataset.trackCoverInitials || initialsFromText(album || title),
+      updateUrl: dataset.trackUpdateUrl || "",
+      ratingUrl: dataset.trackRatingUrl || "",
+      deleteUrl: dataset.trackDeleteUrl || "",
+      lookupUrl: dataset.trackLookupUrl || "",
+      lookupApplyUrl: dataset.trackLookupApplyUrl || "",
+    };
+  }
+
+  function findRowByTrackId(trackId) {
+    return rows.find((row) => trackStateFromRow(row)?.id === trackId) || null;
+  }
+
+  function setMediaSessionMetadata(row) {
+    if (!mediaSession || typeof window.MediaMetadata !== "function") {
+      return;
+    }
+
+    const track = trackStateFromRow(row);
+    if (!track) {
+      mediaSession.metadata = null;
+      return;
+    }
+
+    const artwork = track.coverUrl ? [{ src: track.coverUrl }] : [];
+
+    try {
+      mediaSession.metadata = new window.MediaMetadata({
+        title: track.title,
+        artist: track.artist === "Unknown artist" ? "" : track.artist,
+        album: track.album === "Unknown album" ? "" : track.album,
+        artwork,
+      });
+    } catch (_) {
+      mediaSession.metadata = null;
+    }
+  }
+
+  function updateMediaSessionPlaybackState() {
+    if (!mediaSession) {
+      return;
+    }
+
+    try {
+      mediaSession.playbackState = player && player.getAttribute("src")
+        ? (player.paused ? "paused" : "playing")
+        : "none";
+    } catch (_) {
+      // Ignore unsupported playback state updates.
+    }
+  }
+
+  function updateMediaSessionPositionState() {
+    if (!mediaSession || typeof mediaSession.setPositionState !== "function" || !player) {
+      return;
+    }
+
+    if (!player.getAttribute("src") || !Number.isFinite(player.duration) || player.duration <= 0) {
+      try {
+        mediaSession.setPositionState({});
+      } catch (_) {
+        // Ignore unsupported position state updates.
+      }
+      return;
+    }
+
+    try {
+      mediaSession.setPositionState({
+        duration: player.duration,
+        playbackRate: player.playbackRate || 1,
+        position: Math.min(player.currentTime, player.duration),
+      });
+    } catch (_) {
+      // Ignore unsupported position state updates.
+    }
+  }
+
+  function syncMediaSession() {
+    setMediaSessionMetadata(currentPlaybackRow());
+    updateMediaSessionPlaybackState();
+    updateMediaSessionPositionState();
+  }
+
+  function getAdjacentRow(offset, { clamp = false, fromPlayback = false } = {}) {
+    const visible = visibleRows();
+    if (!visible.length) {
+      return null;
+    }
+
+    const baseRow = fromPlayback ? (currentPlaybackRow() || selectedRow || visible[0]) : (selectedRow || currentPlaybackRow() || visible[0]);
+    const currentIndex = Math.max(visible.indexOf(baseRow), 0);
+    const targetIndex = currentIndex + offset;
+
+    if (clamp) {
+      return visible[Math.min(Math.max(targetIndex, 0), visible.length - 1)] || null;
+    }
+
+    return visible[targetIndex] || null;
+  }
+
+  function selectAdjacentRow(offset, autoplay, options) {
+    const target = getAdjacentRow(offset, options);
+    if (!target) {
+      return false;
+    }
+
+    selectRow(target, autoplay);
+    return true;
+  }
+
+  function setMediaSessionAction(action, handler) {
+    if (!mediaSession || typeof mediaSession.setActionHandler !== "function") {
+      return;
+    }
+
+    try {
+      mediaSession.setActionHandler(action, handler);
+    } catch (_) {
+      // Ignore unsupported action handlers.
+    }
   }
 
   function syncSelectionToVisibleRows() {
@@ -556,7 +726,7 @@
   }
 
   function selectedTrackIds() {
-    return selectedRows.map((row) => row.getAttribute("data-track-id")).filter(Boolean);
+    return selectedRows.map((row) => trackStateFromRow(row)?.id).filter(Boolean);
   }
 
   function isMultiSelectEvent(event) {
@@ -583,12 +753,13 @@
 
   async function saveInlineRating(row, ratingValue) {
     const rating = normalizeRating(ratingValue);
-    const ratingUrl = row.getAttribute("data-track-rating-url");
+    const track = trackStateFromRow(row);
+    const ratingUrl = track ? track.ratingUrl : "";
     if (!ratingUrl) {
       return;
     }
 
-    const previousRating = normalizeRating(row.getAttribute("data-track-rating"));
+    const previousRating = track ? track.rating : 0;
     setInlineRatingState(row, rating);
 
     try {
@@ -645,6 +816,7 @@
     }
 
     playButton.innerHTML = player.paused ? "&#9654;" : "&#10074;&#10074;";
+    updateMediaSessionPlaybackState();
   }
 
   function hideContextMenu() {
@@ -680,7 +852,7 @@
       }
 
       const primaryTrackId = card.getAttribute("data-album-primary-track-id");
-      const isSelected = Boolean(selectedRow) && selectedRow.getAttribute("data-track-id") === primaryTrackId;
+      const isSelected = Boolean(selectedRow) && trackStateFromRow(selectedRow)?.id === primaryTrackId;
       card.classList.toggle("is-selected", isSelected);
     });
   }
@@ -767,15 +939,18 @@
       deleteButton.setAttribute("data-delete-url", "");
       deleteButton.textContent = `Delete ${selectedRows.length} tracks`;
     }
+
+    syncMediaSession();
   }
 
   function renderSingleSelection(row, autoplay) {
-    const title = row.getAttribute("data-track-title") || row.getAttribute("data-track-filename") || "Selected track";
-    const artist = row.getAttribute("data-track-artist") || "Unknown artist";
-    const album = row.getAttribute("data-track-album") || "Unknown album";
-    const filename = row.getAttribute("data-track-filename") || "";
-    const coverUrl = row.getAttribute("data-track-cover-url") || "";
-    const coverInitials = row.getAttribute("data-track-cover-initials") || initialsFromText(album || title);
+    const track = trackStateFromRow(row);
+    const title = track ? track.title : "Selected track";
+    const artist = track && track.artist ? track.artist : "Unknown artist";
+    const album = track && track.album ? track.album : "Unknown album";
+    const filename = track ? track.filename : "";
+    const coverUrl = track ? track.coverUrl : "";
+    const coverInitials = track ? track.coverInitials : initialsFromText(album || title);
 
     titleTarget.textContent = title;
     metaTarget.textContent = `${artist} - ${album} - ${filename}`;
@@ -786,17 +961,17 @@
     artistInput.value = artist === "Unknown artist" ? "" : artist;
     albumInput.value = album === "Unknown album" ? "" : album;
     if (ratingInput) {
-      ratingInput.value = row.getAttribute("data-track-rating") || "0";
+      ratingInput.value = track ? String(track.rating) : "0";
     }
-    editForm.action = row.getAttribute("data-track-update-url") || "";
-    deleteButton.setAttribute("data-delete-url", row.getAttribute("data-track-delete-url") || "");
+    editForm.action = track ? track.updateUrl : "";
+    deleteButton.setAttribute("data-delete-url", track ? track.deleteUrl : "");
     deleteButton.textContent = "Delete";
-    findAlbumInfoButton.setAttribute("data-lookup-url", row.getAttribute("data-track-lookup-url") || "");
-    findAlbumInfoButton.setAttribute("data-lookup-apply-url", row.getAttribute("data-track-lookup-apply-url") || "");
+    findAlbumInfoButton.setAttribute("data-lookup-url", track ? track.lookupUrl : "");
+    findAlbumInfoButton.setAttribute("data-lookup-apply-url", track ? track.lookupApplyUrl : "");
     setEditorEnabled(true);
 
     if (player) {
-      const src = row.getAttribute("data-track-src");
+      const src = track ? track.sourceUrl : "";
       if (src && player.getAttribute("src") !== src) {
         player.src = src;
         progressInput.value = 0;
@@ -809,6 +984,7 @@
       }
     }
 
+    syncMediaSession();
     updatePlayButton();
   }
 
@@ -833,6 +1009,7 @@
         deleteButton.textContent = "Delete";
       }
       setEditorEnabled(false);
+      syncMediaSession();
       updatePlayButton();
       return;
     }
@@ -910,8 +1087,9 @@
       return;
     }
 
-    const lookupUrl = selectedRow.getAttribute("data-track-lookup-url");
-    const applyUrl = selectedRow.getAttribute("data-track-lookup-apply-url");
+    const track = trackStateFromRow(selectedRow);
+    const lookupUrl = track ? track.lookupUrl : "";
+    const applyUrl = track ? track.lookupApplyUrl : "";
     if (!lookupUrl || !applyUrl) {
       return;
     }
@@ -1009,9 +1187,9 @@
                   body: JSON.stringify({
                     release_id: candidate.release_id,
                     release_group_id: candidate.release_group_id,
-                    title: candidate.track_title || selectedRow.getAttribute("data-track-title") || "",
-                    artist: candidate.artist || selectedRow.getAttribute("data-track-artist") || "",
-                    album: candidate.title || selectedRow.getAttribute("data-track-album") || "",
+                    title: candidate.track_title || (track ? track.title : ""),
+                    artist: candidate.artist || (track ? track.artist : ""),
+                    album: candidate.title || (track ? track.album : ""),
                   }),
                 });
                 const payload = await response.json();
@@ -1044,15 +1222,16 @@
       return;
     }
 
+    const track = trackStateFromRow(selectedRow);
     if (lookupTitleInput) {
-      lookupTitleInput.value = selectedRow.getAttribute("data-track-title") || "";
+      lookupTitleInput.value = track ? track.title : "";
     }
     if (lookupArtistInput) {
-      const artist = selectedRow.getAttribute("data-track-artist") || "";
+      const artist = track ? track.artist : "";
       lookupArtistInput.value = artist === "Unknown artist" ? "" : artist;
     }
     if (lookupAlbumInput) {
-      const album = selectedRow.getAttribute("data-track-album") || "";
+      const album = track ? track.album : "";
       lookupAlbumInput.value = album === "Unknown album" ? "" : album;
     }
 
@@ -1138,7 +1317,7 @@
         }
 
         const primaryTrackId = card.getAttribute("data-album-primary-track-id");
-        const row = rows.find((item) => item.getAttribute("data-track-id") === primaryTrackId);
+        const row = findRowByTrackId(primaryTrackId);
         if (row) {
           selectRow(row, false);
         }
@@ -1157,7 +1336,7 @@
         }
 
         const primaryTrackId = card.getAttribute("data-album-primary-track-id");
-        const row = rows.find((item) => item.getAttribute("data-track-id") === primaryTrackId);
+        const row = findRowByTrackId(primaryTrackId);
         if (row) {
           selectRow(row, false);
         }
@@ -1376,6 +1555,49 @@
   }
 
   if (player && playButton) {
+    player.playsInline = true;
+
+    setMediaSessionAction("play", async () => {
+      if (!player.getAttribute("src")) {
+        selectRow(currentPlaybackRow() || visibleRows()[0] || rows[0], false);
+      }
+
+      await player.play().catch(() => {});
+    });
+    setMediaSessionAction("pause", () => {
+      player.pause();
+    });
+    setMediaSessionAction("previoustrack", () => {
+      selectAdjacentRow(-1, true, { clamp: true, fromPlayback: true });
+    });
+    setMediaSessionAction("nexttrack", () => {
+      selectAdjacentRow(1, true, { fromPlayback: true });
+    });
+    setMediaSessionAction("seekbackward", (details) => {
+      const offset = Number.isFinite(details && details.seekOffset) ? details.seekOffset : 10;
+      player.currentTime = Math.max(player.currentTime - offset, 0);
+      updateMediaSessionPositionState();
+    });
+    setMediaSessionAction("seekforward", (details) => {
+      const offset = Number.isFinite(details && details.seekOffset) ? details.seekOffset : 10;
+      const duration = Number.isFinite(player.duration) ? player.duration : player.currentTime + offset;
+      player.currentTime = Math.min(player.currentTime + offset, duration);
+      updateMediaSessionPositionState();
+    });
+    setMediaSessionAction("seekto", (details) => {
+      if (!details || !Number.isFinite(details.seekTime)) {
+        return;
+      }
+
+      if (details.fastSeek && typeof player.fastSeek === "function") {
+        player.fastSeek(details.seekTime);
+      } else {
+        player.currentTime = details.seekTime;
+      }
+
+      updateMediaSessionPositionState();
+    });
+
     playButton.addEventListener("click", async () => {
       if (!selectedRow && rows.length) {
         selectRow(visibleRows()[0] || rows[0], false);
@@ -1395,25 +1617,11 @@
     });
 
     prevButton.addEventListener("click", () => {
-      const visible = visibleRows();
-      if (!visible.length) {
-        return;
-      }
-
-      const currentIndex = Math.max(visible.indexOf(selectedRow), 0);
-      const target = visible[Math.max(currentIndex - 1, 0)];
-      selectRow(target, true);
+      selectAdjacentRow(-1, true, { clamp: true });
     });
 
     nextButton.addEventListener("click", () => {
-      const visible = visibleRows();
-      if (!visible.length) {
-        return;
-      }
-
-      const currentIndex = Math.max(visible.indexOf(selectedRow), 0);
-      const target = visible[Math.min(currentIndex + 1, visible.length - 1)];
-      selectRow(target, true);
+      selectAdjacentRow(1, true, { clamp: true });
     });
 
     if (volumeInput) {
@@ -1440,25 +1648,36 @@
       progressInput.value = progress;
       currentTimeTarget.textContent = formatTime(player.currentTime);
       durationTarget.textContent = formatTime(player.duration);
+      updateMediaSessionPositionState();
     });
 
     player.addEventListener("play", updatePlayButton);
     player.addEventListener("pause", updatePlayButton);
     player.addEventListener("loadedmetadata", () => {
       durationTarget.textContent = formatTime(player.duration);
+      updateMediaSessionPositionState();
     });
     player.addEventListener("ended", () => {
-      const visible = visibleRows();
-      const currentIndex = visible.indexOf(selectedRow);
-      const target = visible[currentIndex + 1];
-      if (target) {
-        selectRow(target, true);
-      } else {
-        player.pause();
-        player.currentTime = 0;
-        updatePlayButton();
+      if (selectAdjacentRow(1, true, { fromPlayback: true })) {
+        return;
       }
+
+      player.pause();
+      player.currentTime = 0;
+      updateMediaSessionPositionState();
+      updatePlayButton();
     });
+    player.addEventListener("ratechange", updateMediaSessionPositionState);
+    player.addEventListener("emptied", () => {
+      syncMediaSession();
+    });
+
+    if (!player.getAttribute("src")) {
+      syncMediaSession();
+    } else {
+      updateMediaSessionPlaybackState();
+      updateMediaSessionPositionState();
+    }
 
     updatePlayButton();
   }

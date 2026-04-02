@@ -167,6 +167,22 @@ def create_app(test_config: dict | None = None) -> Flask:
     def album_group_key(album_name: str, artist_name: str) -> str:
         return f"{album_name.strip().lower()}::{artist_name.strip().lower()}"
 
+    def build_track_view(library_id: str, track, *, album_name: str, artist_name: str) -> dict:
+        title = track.title or Path(track.original_name).stem
+        return {
+            "id": track.id,
+            "title": title,
+            "artist": artist_name,
+            "album": album_name,
+            "rating": track.rating,
+            "original_name": track.original_name,
+            "size": track.size,
+            "updated_at": track.updated_at,
+            "cover_url": cover_url(library_id, track.cover_art_name) if track.cover_art_name else "",
+            "cover_initials": cover_initials(track.album or track.title or track.original_name),
+            "search_value": f"{title} {artist_name} {album_name} {track.original_name}".strip(),
+        }
+
     def build_album_groups(library):
         groups: OrderedDict[tuple[str, str], dict] = OrderedDict()
 
@@ -189,22 +205,10 @@ def create_app(test_config: dict | None = None) -> Flask:
             if track.cover_art_name and not groups[key]["cover_url"]:
                 groups[key]["cover_url"] = cover_url(library.id, track.cover_art_name)
 
-            groups[key]["tracks"].append(
-                {
-                    "id": track.id,
-                    "title": track.title or Path(track.original_name).stem,
-                    "artist": artist_name,
-                    "album": album_name,
-                    "rating": track.rating,
-                    "original_name": track.original_name,
-                    "size": track.size,
-                    "updated_at": track.updated_at,
-                    "cover_url": cover_url(library.id, track.cover_art_name) if track.cover_art_name else "",
-                    "cover_initials": cover_initials(track.album or track.title or track.original_name),
-                }
-            )
+            track_view = build_track_view(library.id, track, album_name=album_name, artist_name=artist_name)
+            groups[key]["tracks"].append(track_view)
             groups[key]["search_value"] = (
-                f"{groups[key]['search_value']} {track.title} {track.original_name}"
+                f"{groups[key]['search_value']} {track_view['search_value']}"
             ).strip()
 
         for group in groups.values():

@@ -1,0 +1,46 @@
+{% macro render_track_row(track, library, track_url, tabindex='0', classes='track-row', show_columns=True) -%}
+  <div
+    role="button"
+    tabindex="{{ tabindex }}"
+    class="{{ classes }}"
+    data-track-row
+    data-track-id="{{ track.id }}"
+    data-search="{{ track.search_value|lower }}"
+    data-track-src="{{ track_url(library.id, track.id) }}"
+    data-track-title="{{ track.title }}"
+    data-track-artist="{{ track.artist }}"
+    data-track-album="{{ track.album }}"
+    data-track-rating="{{ track.rating }}"
+    data-track-filename="{{ track.original_name }}"
+    data-track-size="{{ track.size|filesize }}"
+    data-track-updated="{{ track.updated_at|friendly_time }}"
+    data-track-update-url="{{ url_for('update_track', library_id=library.id, track_id=track.id) }}"
+    data-track-rating-url="{{ url_for('set_track_rating', library_id=library.id, track_id=track.id) }}"
+    data-track-delete-url="{{ url_for('delete_track', library_id=library.id, track_id=track.id) }}"
+    data-track-lookup-url="{{ url_for('lookup_track_album_info', library_id=library.id, track_id=track.id) }}"
+    data-track-lookup-apply-url="{{ url_for('apply_track_album_info', library_id=library.id, track_id=track.id) }}"
+    data-track-cover-url="{{ track.cover_url }}"
+    data-track-cover-initials="{{ track.cover_initials }}"
+  >
+    {% if show_columns %}
+      <span>{{ track.number }}</span>
+      <span class="track-name-cell">{{ track.title }}</span>
+      <span class="track-faint">--:--</span>
+      <span class="track-faint inline-rating" data-inline-rating>
+        {% for value in range(1, 6) %}
+          <button
+            type="button"
+            class="inline-rating-star{% if value <= track.rating %} is-active{% endif %}"
+            data-inline-rating-value="{{ value }}"
+            aria-label="Set {{ track.title }} to {{ value }} stars"
+          >
+            {% if value <= track.rating %}&#9733;{% else %}&#9734;{% endif %}
+          </button>
+        {% endfor %}
+      </span>
+      <span>{{ track.artist }}</span>
+      <span>{{ track.album }}</span>
+      <span>{{ track.size|filesize }}</span>
+    {% endif %}
+  </div>
+{%- endmacro %}

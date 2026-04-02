@@ -506,6 +506,7 @@
   const currentTimeTarget = document.getElementById("current-time");
   const durationTarget = document.getElementById("duration-time");
   const contextMenu = document.getElementById("track-context-menu");
+  const contextEditField = document.getElementById("context-edit-field");
   const contextFindAlbumInfo = document.getElementById("context-find-album-info");
   const lookupDialog = document.getElementById("lookup-dialog");
   const lookupStatus = document.getElementById("lookup-status");
@@ -584,6 +585,10 @@
 
   function findRowByTrackId(trackId) {
     return rows.find((row) => trackStateFromRow(row)?.id === trackId) || null;
+  }
+
+  function defaultTrackHeading() {
+    return "Track details";
   }
 
   function setMediaSessionMetadata(row) {
@@ -821,8 +826,92 @@
 
   function hideContextMenu() {
     if (contextMenu) {
+      contextMenu.dataset.editField = "";
       contextMenu.hidden = true;
     }
+  }
+
+  function contextEditLabel(field) {
+    if (field === "title") {
+      return "Edit title";
+    }
+    if (field === "artist") {
+      return "Edit artist";
+    }
+    if (field === "album") {
+      return "Edit album";
+    }
+    return "Edit details";
+  }
+
+  function inputForEditField(field) {
+    if (field === "artist") {
+      return artistInput;
+    }
+    if (field === "album") {
+      return albumInput;
+    }
+    return titleInput;
+  }
+
+  function openEditorForField(field) {
+    if (!selectedRow || !toggleEditorButton || toggleEditorButton.disabled) {
+      return;
+    }
+
+    setEditorAccordionOpen(true);
+    const input = inputForEditField(field);
+    if (input) {
+      input.focus();
+      if (typeof input.select === "function") {
+        input.select();
+      }
+    }
+  }
+
+  function contextEditFieldFromTarget(target) {
+    if (!target || typeof target.closest !== "function") {
+      return "";
+    }
+
+    const editTarget = target.closest("[data-context-edit-field]");
+    return editTarget ? (editTarget.getAttribute("data-context-edit-field") || "") : "";
+  }
+
+  function rowSearchValue(row) {
+    return (row.getAttribute("data-search") || "").toLowerCase();
+  }
+
+  function cardSearchValue(card) {
+    return (card.getAttribute("data-search") || "").toLowerCase();
+  }
+
+  function matchesSearchValue(haystack, query) {
+    return !query || haystack.includes(query);
+  }
+
+  function syncAlbumSectionVisibility() {
+    albumContainers
+      .filter((container) => !container.hasAttribute("data-album-card"))
+      .forEach((container) => {
+        const hasVisibleRows = Array.from(container.querySelectorAll("[data-track-row]")).some((row) => !row.hidden);
+        container.hidden = !hasVisibleRows;
+      });
+  }
+
+  function applySearchFilter(rawQuery) {
+    const query = String(rawQuery || "").trim().toLowerCase();
+
+    rows.forEach((row) => {
+      row.hidden = !matchesSearchValue(rowSearchValue(row), query);
+    });
+
+    albumCards.forEach((card) => {
+      card.hidden = !matchesSearchValue(cardSearchValue(card), query);
+    });
+
+    syncAlbumSectionVisibility();
+    syncSelectionToVisibleRows();
   }
 
   function currentLookupQuery() {
@@ -869,7 +958,7 @@
 
   function setTransportSelectionSummary(title, meta) {
     if (toggleSelectionTitle) {
-      toggleSelectionTitle.textContent = title || "Select a track";
+      toggleSelectionTitle.textContent = title || defaultTrackHeading();
     }
 
     if (toggleSelectionMeta) {
@@ -945,7 +1034,7 @@
 
   function renderSingleSelection(row, autoplay) {
     const track = trackStateFromRow(row);
-    const title = track ? track.title : "Selected track";
+    const title = track ? track.title : defaultTrackHeading();
     const artist = track && track.artist ? track.artist : "Unknown artist";
     const album = track && track.album ? track.album : "Unknown album";
     const filename = track ? track.filename : "";
@@ -993,12 +1082,12 @@
 
     if (!selectedRows.length) {
       if (titleTarget) {
-        titleTarget.textContent = "Select a track";
+        titleTarget.textContent = defaultTrackHeading();
       }
       if (metaTarget) {
         metaTarget.textContent = "Choose a row to edit metadata or play it from the transport bar.";
       }
-      setTransportSelectionSummary("Select a track", "Choose a row to view details, edit metadata, or delete it.");
+      setTransportSelectionSummary(defaultTrackHeading(), "Choose a row to view details, edit metadata, or delete it.");
       setArtFrame(artTarget, "", "SS");
       if (ratingInput) {
         ratingInput.value = "0";
@@ -1026,7 +1115,7 @@
     renderSingleSelection(selectedRow, autoplay);
   }
 
-  function openContextMenu(event, row) {
+  function openContextMenu(event, row, editField = "") {
     if (!contextMenu) {
       return;
     }
@@ -1037,6 +1126,11 @@
       selectedRow = row;
       renderSelection(false);
     }
+
+    if (contextEditField) {
+      contextEditField.textContent = contextEditLabel(editField);
+    }
+    contextMenu.dataset.editField = editField || "";
     contextMenu.hidden = false;
     contextMenu.style.left = `${event.clientX}px`;
     contextMenu.style.top = `${event.clientY}px`;
@@ -1270,7 +1364,7 @@
 
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        openContextMenu(event, row);
+        openContextMenu(event, row, contextEditFieldFromTarget(event.target));
       });
 
       row.addEventListener("touchstart", (event) => {
@@ -1279,8 +1373,9 @@
         }
 
         const touch = event.touches[0];
+        const editField = contextEditFieldFromTarget(event.target);
         longPressTimer = window.setTimeout(() => {
-          openContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, row);
+          openContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, row, editField);
         }, 450);
       }, { passive: true });
 
@@ -1386,6 +1481,14 @@
     });
   }
 
+  if (contextEditField) {
+    contextEditField.addEventListener("click", () => {
+      const editField = contextMenu ? (contextMenu.dataset.editField || "") : "";
+      hideContextMenu();
+      openEditorForField(editField || "title");
+    });
+  }
+
   if (findAlbumInfoButton) {
     findAlbumInfoButton.addEventListener("click", openLookupDialog);
   }
@@ -1460,26 +1563,7 @@
 
   if (filterInput && rows.length) {
     filterInput.addEventListener("input", () => {
-      const query = filterInput.value.trim().toLowerCase();
-
-      rows.forEach((row) => {
-        const haystack = row.getAttribute("data-search") || "";
-        row.hidden = Boolean(query) && !haystack.includes(query);
-      });
-
-      albumCards.forEach((card) => {
-        const haystack = (card.getAttribute("data-search") || "").toLowerCase();
-        card.hidden = Boolean(query) && !haystack.includes(query);
-      });
-
-      albumContainers
-        .filter((container) => !container.hasAttribute("data-album-card"))
-        .forEach((container) => {
-          const hasVisibleRows = Array.from(container.querySelectorAll("[data-track-row]")).some((row) => !row.hidden);
-          container.hidden = !hasVisibleRows;
-        });
-
-      syncSelectionToVisibleRows();
+      applySearchFilter(filterInput.value);
     });
   }
 

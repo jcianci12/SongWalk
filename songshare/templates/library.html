@@ -220,7 +220,7 @@
               <div class="transport-selection-toggle-row">
                 <button type="button" class="transport-selection-toggle" id="toggle-selection-panel" aria-expanded="false">
                   <span class="transport-selection-toggle-copy">
-                    <span class="transport-selection-toggle-title" id="toggle-selection-title">Select a track</span>
+                    <span class="transport-selection-toggle-title" id="toggle-selection-title">Track details</span>
                     <span class="transport-selection-toggle-meta" id="toggle-selection-meta">Choose a row to view details, edit metadata, or delete it.</span>
                   </span>
                   <span class="transport-selection-toggle-arrow" aria-hidden="true">&#9662;</span>
@@ -231,11 +231,11 @@
                   {% set art_id = 'selection-art' %}
                   {% set art_classes = 'selection-art' %}
                   {% set art_cover_url = '' %}
-                  {% set art_alt_text = 'Selected track cover art' %}
+                  {% set art_alt_text = 'Track cover art' %}
                   {% set art_fallback_text = 'SW' %}
                   {% include '_album_art.html' %}
                   <div>
-                    <h2 id="now-playing-title">Select a track</h2>
+                    <h2 id="now-playing-title">Track details</h2>
                     <p id="now-playing-meta">Choose a row to edit metadata or play it from the transport bar.</p>
                   </div>
                 </div>
@@ -294,6 +294,7 @@
     </div>
 
     <div class="context-menu" id="track-context-menu" hidden>
+      <button type="button" class="context-menu-item" id="context-edit-field">Edit details</button>
       <button type="button" class="context-menu-item" id="context-find-album-info">Find album info</button>
     </div>
 

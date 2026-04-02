@@ -823,6 +823,17 @@ body.is-window-drop-active .window-drop-card {
   font-weight: 500;
 }
 
+.context-edit-target {
+  display: block;
+  min-width: 0;
+}
+
+.context-edit-target:hover {
+  color: #2d5f98;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
 .track-faint {
   color: var(--text-faint);
 }
@@ -1282,8 +1293,19 @@ audio {
   }
 
   .album-summary {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+    align-items: start;
     border-right: 0;
     border-bottom: 1px solid #e7eef7;
+  }
+
+  .album-summary .album-art {
+    flex-basis: 72px;
+    height: 72px;
+    font-size: 1.4rem;
   }
 
   .track-row {
@@ -1371,5 +1393,39 @@ audio {
   .share-jump,
   .search-stack {
     width: 100%;
+  }
+
+  .album-summary {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .album-summary .album-art,
+  .selection-card .selection-art {
+    flex-basis: 56px;
+    height: 56px;
+    font-size: 1.1rem;
+  }
+
+  .selection-card {
+    align-items: start;
+  }
+
+  .transport-selection-toggle {
+    padding: 8px 10px;
+  }
+
+  .transport-selection-toggle-meta {
+    font-size: 0.82rem;
+  }
+
+  .transport-main {
+    gap: 12px;
+  }
+
+  .transport-progress,
+  .transport-volume {
+    gap: 8px;
   }
 }

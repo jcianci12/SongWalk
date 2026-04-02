@@ -1,3 +1,7 @@
+{% macro render_editable_text(field, value, classes='') -%}
+  <span class="{{ classes }} context-edit-target" data-context-edit-field="{{ field }}">{{ value }}</span>
+{%- endmacro %}
+
 {% macro render_track_row(track, library, track_url, tabindex='0', classes='track-row', show_columns=True) -%}
   <div
     role="button"
@@ -24,7 +28,7 @@
   >
     {% if show_columns %}
       <span>{{ track.number }}</span>
-      <span class="track-name-cell">{{ track.title }}</span>
+      {{ render_editable_text('title', track.title, 'track-name-cell') }}
       <span class="track-faint">--:--</span>
       <span class="track-faint inline-rating" data-inline-rating>
         {% for value in range(1, 6) %}
@@ -38,8 +42,8 @@
           </button>
         {% endfor %}
       </span>
-      <span>{{ track.artist }}</span>
-      <span>{{ track.album }}</span>
+      {{ render_editable_text('artist', track.artist) }}
+      {{ render_editable_text('album', track.album) }}
       <span>{{ track.size|filesize }}</span>
     {% endif %}
   </div>

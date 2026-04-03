@@ -139,10 +139,31 @@ resolve_python() {
   fail "No Python launcher was found." "Create .venv first or install python3/python on PATH."
 }
 
+stop_python_runtime() {
+  [[ -f "$PID_FILE" ]] || return 0
+
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "Stopping the existing SongWalk Python process on port ${PORT}..."
+    kill "$pid" 2>/dev/null || true
+
+    local end_time="$((SECONDS + 10))"
+    while (( SECONDS < end_time )); do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        break
+      fi
+      sleep 0.25
+    done
+  fi
+
+  rm -f "$PID_FILE"
+}
+
 start_python_runtime() {
   if test_songshare_ready; then
-    echo "SongWalk is already responding on http://127.0.0.1:${PORT}/. Reusing the existing Python/local instance."
-    return
+    # Restart the tracked Python app so code changes are picked up on every deploy.
+    stop_python_runtime
   fi
 
   local python_bin
@@ -176,11 +197,7 @@ show_docker_logs() {
 }
 
 start_docker_runtime() {
-  if test_songshare_ready; then
-    echo "SongWalk is already responding on http://127.0.0.1:${PORT}/. Reusing the existing local service."
-    return
-  fi
-
+  # Always rebuild in docker mode so the published port reflects the current tree.
   echo "Starting SongWalk with Docker Compose..."
   if ! (cd "$ROOT_DIR" && SONGSHARE_PUBLISHED_PORT="$PORT" docker compose up --build -d); then
     fail "docker compose up failed."

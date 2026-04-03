@@ -4,7 +4,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SongWalk {{ library.id }}</title>
+    <title>{{ library.id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
   </head>
@@ -215,7 +215,7 @@
             </section>
           {% endif %}
 
-          <section class="transport-band">
+          <section class="details-shell">
             <div class="transport-selection-shell">
               <div class="transport-selection-toggle-row">
                 <button type="button" class="transport-selection-toggle" id="toggle-selection-panel" aria-expanded="false">
@@ -270,22 +270,16 @@
                 </div>
               </div>
             </div>
+          </section>
+
+          <section class="transport-band">
             <audio id="deck-player" preload="none"></audio>
-            <div class="transport-main">
-              <div class="transport-controls">
-                <button type="button" class="transport-button" data-transport-prev>&#9664;&#9664;</button>
-                <button type="button" class="transport-play" data-transport-play>&#9654;</button>
-                <button type="button" class="transport-button" data-transport-next>&#9654;&#9654;</button>
-              </div>
-              <div class="transport-progress">
-                <span id="current-time">0:00</span>
-                <input type="range" min="0" max="100" value="0" data-transport-progress>
-                <span id="duration-time">0:00</span>
-              </div>
-              <div class="transport-volume">
-                <span>Volume</span>
-                <input type="range" min="0" max="1" step="0.01" value="0.75" data-transport-volume>
-              </div>
+            <div class="transport-controls">
+              <button type="button" class="transport-button transport-toggle" data-transport-shuffle aria-pressed="false">Shuffle</button>
+              <button type="button" class="transport-button transport-nav" data-transport-prev>Prev</button>
+              <button type="button" class="transport-play" data-transport-play>&#9654;</button>
+              <button type="button" class="transport-button transport-nav" data-transport-next>Next</button>
+              <button type="button" class="transport-button transport-toggle" data-transport-repeat aria-pressed="false">Repeat</button>
             </div>
           </section>
         </main>

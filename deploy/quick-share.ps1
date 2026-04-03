@@ -244,6 +244,34 @@ function Resolve-PythonLaunch {
   Fail -Message "No Python launcher was found." -Details @("Create .venv first or install a 'python' command on PATH.")
 }
 
+function Stop-PythonRuntime {
+  if (-not (Test-Path $PidFile)) {
+    return
+  }
+
+  $rawPid = Get-Content -LiteralPath $PidFile -ErrorAction SilentlyContinue | Select-Object -First 1
+  $pid = 0
+  if (-not [int]::TryParse(($rawPid | Out-String).Trim(), [ref]$pid)) {
+    Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+    return
+  }
+
+  $process = Get-Process -Id $pid -ErrorAction SilentlyContinue
+  if ($process) {
+    Write-Host "Stopping the existing SongWalk Python process on port $Port..."
+    Stop-Process -Id $pid -Force
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+      if (-not (Get-Process -Id $pid -ErrorAction SilentlyContinue)) {
+        break
+      }
+      Start-Sleep -Milliseconds 250
+    }
+  }
+
+  Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
+}
+
 function Start-PythonRuntime {
   param(
     [Parameter(Mandatory = $true)]
@@ -252,8 +280,8 @@ function Start-PythonRuntime {
 
   $localUrl = "http://127.0.0.1:$LocalPort/"
   if (Test-SongshareReady -Url $localUrl) {
-    Write-Host "SongWalk is already responding on $localUrl. Reusing the existing Python/local instance."
-    return $null
+    # Restart the tracked Python app so code changes are picked up on every deploy.
+    Stop-PythonRuntime
   }
 
   $python = Resolve-PythonLaunch
@@ -306,11 +334,7 @@ function Start-DockerRuntime {
   )
 
   $localUrl = "http://127.0.0.1:$LocalPort/"
-  if (Test-SongshareReady -Url $localUrl) {
-    Write-Host "SongWalk is already responding on $localUrl. Reusing the existing local service."
-    return
-  }
-
+  # Always rebuild in docker mode so the published port reflects the current tree.
   Write-Host "Starting SongWalk with Docker Compose..."
   $previousPublishedPort = $env:SONGSHARE_PUBLISHED_PORT
   $env:SONGSHARE_PUBLISHED_PORT = [string]$LocalPort

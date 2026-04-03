@@ -895,6 +895,16 @@ body.is-window-drop-active .window-drop-card {
   flex-wrap: wrap;
 }
 
+.details-shell {
+  padding: 0 16px 164px;
+}
+
+.details-shell .transport-selection-shell {
+  border: 1px solid #d7e5f4;
+  border-top: 0;
+  background: linear-gradient(180deg, #fdfefe, #eef5fc);
+}
+
 .editor-accordion {
   max-height: 0;
   overflow: hidden;
@@ -947,9 +957,9 @@ body.is-window-drop-active .window-drop-card {
   z-index: 70;
   width: min(1400px, calc(100vw - 32px));
   margin: 0 auto;
-  display: grid;
-  gap: 12px;
-  padding: 10px 18px 12px;
+  display: flex;
+  justify-content: center;
+  padding: 10px 18px;
   border-left: 1px solid #b7cbe1;
   border-right: 1px solid #b7cbe1;
   border-top: 1px solid #b7cbe1;
@@ -1039,28 +1049,31 @@ body.is-window-drop-active .window-drop-card {
   padding-top: 4px;
 }
 
-.transport-main {
-  display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) 220px;
-  gap: 18px;
-  align-items: center;
-}
-
 .transport-controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(5, auto);
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  justify-content: center;
 }
 
 .transport-button,
 .transport-play {
-  height: 28px;
-  min-width: 34px;
+  min-height: 36px;
+}
+
+.transport-button {
+  min-width: 68px;
+}
+
+.transport-nav {
+  min-width: 60px;
 }
 
 .transport-play {
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
   border-radius: 999px;
   border-color: #7caad9;
   background: radial-gradient(circle at 35% 30%, #7fc2ff, #3e92df 55%, #2d73bb);
@@ -1068,16 +1081,10 @@ body.is-window-drop-active .window-drop-card {
   font-size: 1.15rem;
 }
 
-.transport-progress,
-.transport-volume {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.transport-progress input,
-.transport-volume input {
-  width: 100%;
+.transport-toggle[aria-pressed="true"] {
+  border-color: #4d83bf;
+  background: linear-gradient(180deg, #fafdff, #d5e9fb);
+  color: #1f4f85;
 }
 
 input[type="range"] {
@@ -1278,11 +1285,6 @@ audio {
 }
 
 @media (max-width: 1100px) {
-  .transport-band,
-  .transport-main {
-    grid-template-columns: 1fr;
-  }
-
   .wmp-page.is-library-drawer-open {
     overflow: hidden;
   }
@@ -1332,7 +1334,7 @@ audio {
 
 @media (max-width: 720px) {
   .wmp-page {
-    padding: 0 0 132px;
+    padding: 0 0 96px;
   }
 
   .wmp-window {
@@ -1354,6 +1356,8 @@ audio {
     width: 100%;
     border-left: 0;
     border-right: 0;
+    padding-top: 8px;
+    padding-bottom: 8px;
     padding-left: 12px;
     padding-right: 12px;
   }
@@ -1395,6 +1399,10 @@ audio {
     width: 100%;
   }
 
+  .details-shell {
+    padding: 0 0 128px;
+  }
+
   .album-summary {
     grid-template-columns: 56px minmax(0, 1fr);
     gap: 8px;
@@ -1420,12 +1428,18 @@ audio {
     font-size: 0.82rem;
   }
 
-  .transport-main {
-    gap: 12px;
+  .transport-controls {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
   }
 
-  .transport-progress,
-  .transport-volume {
-    gap: 8px;
+  .transport-button,
+  .transport-play {
+    min-width: 0;
+  }
+
+  .transport-toggle {
+    flex: 1 1 0;
   }
 }

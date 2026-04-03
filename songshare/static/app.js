@@ -1,4 +1,19 @@
 (function () {
+  // Increment this whenever we need to confirm a fresh JS build is running in the browser.
+  const SCRIPT_VERSION = "2026-04-03-transport-title-1";
+  const DEBUG_FILTERING = true;
+
+  function debugLog(scope, ...details) {
+    if (!DEBUG_FILTERING || !window.console || typeof window.console.log !== "function") {
+      return;
+    }
+
+    window.console.log(`[Songshare ${SCRIPT_VERSION}] ${scope}`, ...details);
+  }
+
+  window.__SONGWALK_SCRIPT_VERSION = SCRIPT_VERSION;
+  debugLog("boot", { href: window.location.href });
+
   function resolveLibraryTarget(rawValue) {
     const value = (rawValue || "").trim();
     if (!value) {
@@ -498,13 +513,11 @@
   const findAlbumInfoButton = document.getElementById("find-album-info");
   const deleteButton = document.getElementById("delete-track");
   const filterInput = document.querySelector("[data-track-filter]");
-  const playButton = document.querySelector("[data-transport-play]");
+  const shuffleButton = document.querySelector("[data-transport-shuffle]");
   const prevButton = document.querySelector("[data-transport-prev]");
+  const playButton = document.querySelector("[data-transport-play]");
   const nextButton = document.querySelector("[data-transport-next]");
-  const progressInput = document.querySelector("[data-transport-progress]");
-  const volumeInput = document.querySelector("[data-transport-volume]");
-  const currentTimeTarget = document.getElementById("current-time");
-  const durationTarget = document.getElementById("duration-time");
+  const repeatButton = document.querySelector("[data-transport-repeat]");
   const contextMenu = document.getElementById("track-context-menu");
   const contextEditField = document.getElementById("context-edit-field");
   const contextFindAlbumInfo = document.getElementById("context-find-album-info");
@@ -522,6 +535,9 @@
   let selectedRow = null;
   let selectedRows = [];
   let longPressTimer = null;
+  let isShuffleEnabled = false;
+  let isRepeatEnabled = false;
+  const defaultDocumentTitle = document.title;
 
   function visibleRows() {
     return rows.filter((row) => !row.hidden);
@@ -560,7 +576,7 @@
     }
 
     const dataset = row.dataset || {};
-    const title = dataset.trackTitle || dataset.trackFilename || "Selected track";
+    const title = dataset.trackTitle || dataset.trackFilename || "Untitled track";
     const artist = dataset.trackArtist || "";
     const album = dataset.trackAlbum || "";
 
@@ -589,6 +605,65 @@
 
   function defaultTrackHeading() {
     return "Track details";
+  }
+
+  function documentTitleTrack() {
+    return currentPlaybackRow() || (selectedRows.length === 1 ? selectedRow : null);
+  }
+
+  // Keep the browser tab tied to the active track instead of selection-only state.
+  function syncDocumentTitle(fallbackTitle = defaultDocumentTitle) {
+    const track = trackStateFromRow(documentTitleTrack());
+    document.title = (track && track.title) || fallbackTitle;
+  }
+
+  function setTogglePressed(button, pressed) {
+    if (!button) {
+      return;
+    }
+
+    button.setAttribute("aria-pressed", pressed ? "true" : "false");
+  }
+
+  function randomVisibleRow(excludingRow) {
+    const visible = visibleRows();
+    if (!visible.length) {
+      return null;
+    }
+
+    if (visible.length === 1) {
+      return visible[0];
+    }
+
+    const candidates = excludingRow ? visible.filter((row) => row !== excludingRow) : visible;
+    if (!candidates.length) {
+      return excludingRow || visible[0];
+    }
+
+    const index = Math.floor(Math.random() * candidates.length);
+    return candidates[index] || candidates[0];
+  }
+
+  function nextPlaybackRow() {
+    const currentRow = currentPlaybackRow() || selectedRow;
+    if (isRepeatEnabled && currentRow) {
+      return currentRow;
+    }
+
+    if (isShuffleEnabled) {
+      return randomVisibleRow(currentRow);
+    }
+
+    return getAdjacentRow(1, { fromPlayback: true });
+  }
+
+  function previousPlaybackRow() {
+    const currentRow = currentPlaybackRow() || selectedRow;
+    if (isShuffleEnabled) {
+      return randomVisibleRow(currentRow);
+    }
+
+    return getAdjacentRow(-1, { clamp: true, fromPlayback: true });
   }
 
   function setMediaSessionMetadata(row) {
@@ -726,6 +801,12 @@
       selectedRow = null;
       selectedRows = [];
     }
+
+    debugLog("selection.sync", {
+      visibleRows: visible.length,
+      selectedRowId: trackStateFromRow(selectedRow)?.id || "",
+      selectedRowIds: selectedRows.map((row) => trackStateFromRow(row)?.id || "").filter(Boolean),
+    });
 
     renderSelection(false);
   }
@@ -878,12 +959,19 @@
     return editTarget ? (editTarget.getAttribute("data-context-edit-field") || "") : "";
   }
 
+  function normalizeSearchText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function rowSearchValue(row) {
-    return (row.getAttribute("data-search") || "").toLowerCase();
+    return normalizeSearchText(row.getAttribute("data-search") || "");
   }
 
   function cardSearchValue(card) {
-    return (card.getAttribute("data-search") || "").toLowerCase();
+    return normalizeSearchText(card.getAttribute("data-search") || "");
   }
 
   function matchesSearchValue(haystack, query) {
@@ -896,22 +984,60 @@
       .forEach((container) => {
         const hasVisibleRows = Array.from(container.querySelectorAll("[data-track-row]")).some((row) => !row.hidden);
         container.hidden = !hasVisibleRows;
+        debugLog("filter.section", {
+          albumKey: container.getAttribute("data-album-key") || "",
+          hasVisibleRows,
+          hidden: container.hidden,
+        });
       });
   }
 
   function applySearchFilter(rawQuery) {
-    const query = String(rawQuery || "").trim().toLowerCase();
+    const query = normalizeSearchText(rawQuery);
+
+    debugLog("filter.apply.start", {
+      rawQuery,
+      normalizedQuery: query,
+      rowCount: rows.length,
+      albumCardCount: albumCards.length,
+    });
 
     rows.forEach((row) => {
-      row.hidden = !matchesSearchValue(rowSearchValue(row), query);
+      const track = trackStateFromRow(row);
+      const haystack = rowSearchValue(row);
+      const match = matchesSearchValue(haystack, query);
+      row.hidden = !match;
+      debugLog("filter.row", {
+        id: track ? track.id : "",
+        title: track ? track.title : "",
+        haystack,
+        match,
+        hidden: row.hidden,
+      });
     });
 
     albumCards.forEach((card) => {
-      card.hidden = !matchesSearchValue(cardSearchValue(card), query);
+      const haystack = cardSearchValue(card);
+      const match = matchesSearchValue(haystack, query);
+      card.hidden = !match;
+      debugLog("filter.albumCard", {
+        primaryTrackId: card.getAttribute("data-album-primary-track-id") || "",
+        haystack,
+        match,
+        hidden: card.hidden,
+      });
     });
 
     syncAlbumSectionVisibility();
     syncSelectionToVisibleRows();
+
+    debugLog("filter.apply.done", {
+      normalizedQuery: query,
+      visibleRows: visibleRows().length,
+      hiddenRows: rows.filter((row) => row.hidden).length,
+      visibleAlbumCards: albumCards.filter((card) => !card.hidden).length,
+      hiddenAlbumCards: albumCards.filter((card) => card.hidden).length,
+    });
   }
 
   function currentLookupQuery() {
@@ -1029,6 +1155,7 @@
       deleteButton.textContent = `Delete ${selectedRows.length} tracks`;
     }
 
+    syncDocumentTitle();
     syncMediaSession();
   }
 
@@ -1063,9 +1190,6 @@
       const src = track ? track.sourceUrl : "";
       if (src && player.getAttribute("src") !== src) {
         player.src = src;
-        progressInput.value = 0;
-        currentTimeTarget.textContent = "0:00";
-        durationTarget.textContent = "0:00";
       }
 
       if (autoplay) {
@@ -1073,6 +1197,7 @@
       }
     }
 
+    syncDocumentTitle();
     syncMediaSession();
     updatePlayButton();
   }
@@ -1098,6 +1223,7 @@
         deleteButton.textContent = "Delete";
       }
       setEditorEnabled(false);
+      syncDocumentTitle();
       syncMediaSession();
       updatePlayButton();
       return;
@@ -1337,6 +1463,20 @@
   }
 
   if (rows.length) {
+    debugLog("rows.init", {
+      rowCount: rows.length,
+      albumCardCount: albumCards.length,
+      filterPresent: Boolean(filterInput),
+      sampleRows: rows.slice(0, 5).map((row) => {
+        const track = trackStateFromRow(row);
+        return {
+          id: track ? track.id : "",
+          title: track ? track.title : "",
+          search: rowSearchValue(row),
+        };
+      }),
+    });
+
     rows.forEach((row) => {
       row.addEventListener("click", (event) => {
         if (isMultiSelectEvent(event)) {
@@ -1562,8 +1702,24 @@
   }
 
   if (filterInput && rows.length) {
-    filterInput.addEventListener("input", () => {
-      applySearchFilter(filterInput.value);
+    ["input", "search", "change"].forEach((eventName) => {
+      filterInput.addEventListener(eventName, () => {
+        debugLog("filter.event", {
+          eventName,
+          value: filterInput.value,
+        });
+        applySearchFilter(filterInput.value);
+      });
+    });
+
+    debugLog("filter.ready", {
+      initialValue: filterInput.value,
+    });
+    applySearchFilter(filterInput.value);
+  } else {
+    debugLog("filter.unavailable", {
+      filterPresent: Boolean(filterInput),
+      rowCount: rows.length,
     });
   }
 
@@ -1652,10 +1808,16 @@
       player.pause();
     });
     setMediaSessionAction("previoustrack", () => {
-      selectAdjacentRow(-1, true, { clamp: true, fromPlayback: true });
+      const target = previousPlaybackRow();
+      if (target) {
+        selectRow(target, true);
+      }
     });
     setMediaSessionAction("nexttrack", () => {
-      selectAdjacentRow(1, true, { fromPlayback: true });
+      const target = nextPlaybackRow();
+      if (target) {
+        selectRow(target, true);
+      }
     });
     setMediaSessionAction("seekbackward", (details) => {
       const offset = Number.isFinite(details && details.seekOffset) ? details.seekOffset : 10;
@@ -1700,49 +1862,49 @@
       updatePlayButton();
     });
 
-    prevButton.addEventListener("click", () => {
-      selectAdjacentRow(-1, true, { clamp: true });
-    });
-
-    nextButton.addEventListener("click", () => {
-      selectAdjacentRow(1, true, { clamp: true });
-    });
-
-    if (volumeInput) {
-      player.volume = Number(volumeInput.value);
-      volumeInput.addEventListener("input", () => {
-        player.volume = Number(volumeInput.value);
-      });
-    }
-
-    if (progressInput) {
-      progressInput.addEventListener("input", () => {
-        if (player.duration) {
-          player.currentTime = (Number(progressInput.value) / 100) * player.duration;
+    if (prevButton) {
+      prevButton.addEventListener("click", () => {
+        const target = previousPlaybackRow();
+        if (target) {
+          selectRow(target, true);
         }
       });
     }
 
-    player.addEventListener("timeupdate", () => {
-      if (!progressInput) {
-        return;
-      }
+    if (nextButton) {
+      nextButton.addEventListener("click", () => {
+        const target = nextPlaybackRow();
+        if (target) {
+          selectRow(target, true);
+        }
+      });
+    }
 
-      const progress = player.duration ? (player.currentTime / player.duration) * 100 : 0;
-      progressInput.value = progress;
-      currentTimeTarget.textContent = formatTime(player.currentTime);
-      durationTarget.textContent = formatTime(player.duration);
-      updateMediaSessionPositionState();
-    });
+    if (shuffleButton) {
+      setTogglePressed(shuffleButton, isShuffleEnabled);
+      shuffleButton.addEventListener("click", () => {
+        isShuffleEnabled = !isShuffleEnabled;
+        setTogglePressed(shuffleButton, isShuffleEnabled);
+      });
+    }
+
+    if (repeatButton) {
+      setTogglePressed(repeatButton, isRepeatEnabled);
+      repeatButton.addEventListener("click", () => {
+        isRepeatEnabled = !isRepeatEnabled;
+        setTogglePressed(repeatButton, isRepeatEnabled);
+      });
+    }
 
     player.addEventListener("play", updatePlayButton);
     player.addEventListener("pause", updatePlayButton);
     player.addEventListener("loadedmetadata", () => {
-      durationTarget.textContent = formatTime(player.duration);
       updateMediaSessionPositionState();
     });
     player.addEventListener("ended", () => {
-      if (selectAdjacentRow(1, true, { fromPlayback: true })) {
+      const target = nextPlaybackRow();
+      if (target) {
+        selectRow(target, true);
         return;
       }
 
@@ -1753,6 +1915,7 @@
     });
     player.addEventListener("ratechange", updateMediaSessionPositionState);
     player.addEventListener("emptied", () => {
+      syncDocumentTitle();
       syncMediaSession();
     });
 

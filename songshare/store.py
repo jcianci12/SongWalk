@@ -290,6 +290,13 @@ class Store:
                 )
                 track.cover_art_name = cover_name
 
+            write_mp3_metadata(
+                self.library_files_dir(library_id) / track.stored_name,
+                title=track.title,
+                artist=track.artist,
+                album=track.album,
+                rating=track.rating,
+            )
             track.updated_at = _now()
             library.updated_at = track.updated_at
             self._write_library(library)

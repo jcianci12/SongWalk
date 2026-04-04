@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ library.id }}</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%232c82d3'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='24' fill='white' font-family='Segoe UI, Arial, sans-serif'%3ESS%3C/text%3E%3C/svg%3E" data-dynamic-favicon>
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
   </head>
@@ -28,6 +29,7 @@
               <span class="upload-progress-copy" data-upload-progress-copy>0%</span>
             </div>
           </div>
+          <a class="frame-button" href="{{ url_for('view_import', library_id=library.id) }}">Import</a>
           <a class="frame-button" href="{{ url_for('home') }}">Share access</a>
           <button type="button" class="frame-button" data-copy="{{ share_url }}">Copy share link</button>
         </div>
@@ -44,31 +46,6 @@
             <p class="nav-title">Library</p>
             <a class="nav-item" href="{{ url_for('home') }}">Open by share URL</a>
             <span class="nav-item is-active">{{ library.id[:8] }}</span>
-          </div>
-          <div class="nav-group">
-            <p class="nav-title">Import</p>
-            <form
-              action="{{ url_for('upload_tracks', library_id=library.id) }}"
-              method="post"
-              enctype="multipart/form-data"
-              class="upload-tray drawer-upload-tray"
-              data-upload-form
-            >
-              <div class="drawer-import-actions">
-                <label class="frame-button drawer-import-button">
-                  Import files
-                  <input type="file" name="tracks" multiple accept=".aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,.wma,audio/*" data-hidden-file-input>
-                </label>
-                <label class="frame-button drawer-import-button">
-                  Import folder
-                  <input type="file" name="tracks-folder" webkitdirectory directory multiple data-hidden-directory-input>
-                </label>
-              </div>
-              <label class="upload-prompt" data-dropzone>
-                <span>Drop files here, or import them from this drawer.</span>
-                <small>{{ library_files_dir }}</small>
-              </label>
-            </form>
           </div>
         </aside>
 
@@ -274,6 +251,21 @@
 
           <section class="transport-band">
             <audio id="deck-player" preload="none"></audio>
+            <div class="transport-progress-shell">
+              <span class="transport-time" data-transport-current>0:00</span>
+              <input
+                type="range"
+                class="transport-progress"
+                data-transport-progress
+                min="0"
+                max="100"
+                step="0.1"
+                value="0"
+                aria-label="Playback position"
+                disabled
+              >
+              <span class="transport-time" data-transport-duration>0:00</span>
+            </div>
             <div class="transport-controls">
               <button type="button" class="transport-button transport-toggle" data-transport-shuffle aria-pressed="false">Shuffle</button>
               <button type="button" class="transport-button transport-nav" data-transport-prev>Prev</button>

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Import | {{ library.id }}</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" data-dynamic-favicon>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+  </head>
+  <body class="wmp-page import-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
+    <div class="wmp-window">
+      <header class="title-band">
+        <div class="title-band-left">
+          {% include '_brand.html' %}
+          {% if local_access_mode %}
+            <span class="local-access-badge" title="Direct local access">Local</span>
+          {% endif %}
+          <span class="crumbs">Library &gt; Import &gt; {{ library.id[:8] }}</span>
+        </div>
+        <div class="title-actions">
+          <a class="frame-button" href="{{ url_for('view_library', library_id=library.id) }}">Back to library</a>
+          <button type="button" class="frame-button" data-copy="{{ share_url }}">Copy share link</button>
+        </div>
+      </header>
+
+      <div class="menu-band">
+        <div class="menu-links">
+          <span>Import tracks from local files, YouTube, or Spotify, then send them back into the shared library.</span>
+        </div>
+      </div>
+
+      <main class="import-layout">
+        <section class="import-hero">
+          <div>
+            <p class="view-caption">Import studio</p>
+            <h1>{{ library.id }}</h1>
+            <p class="import-hero-copy">
+              Local uploads land immediately. YouTube and Spotify imports download audio, then SongWalk fills missing tags from MusicBrainz when it has enough metadata to match.
+            </p>
+          </div>
+          <div class="title-upload-status import-status-card" data-upload-status-shell hidden>
+            <p class="status-line title-upload-copy" data-upload-status>Uploading tracks...</p>
+            <div class="upload-progress title-upload-progress" data-upload-progress hidden>
+              <div class="upload-progress-track">
+                <div class="upload-progress-bar" data-upload-progress-bar></div>
+              </div>
+              <span class="upload-progress-copy" data-upload-progress-copy>0%</span>
+            </div>
+          </div>
+          <div class="title-upload-status import-status-card" data-remote-import-shell hidden>
+            <p class="status-line title-upload-copy" data-remote-import-phase>Waiting for an import to start...</p>
+            <p class="status-line" data-remote-import-detail>Progress updates appear here while YouTube and Spotify imports run.</p>
+            <div class="upload-progress title-upload-progress" data-remote-import-progress hidden>
+              <div class="upload-progress-track">
+                <div class="upload-progress-bar" data-remote-import-bar></div>
+              </div>
+              <span class="upload-progress-copy" data-remote-import-copy>Working...</span>
+            </div>
+          </div>
+        </section>
+
+        {% if notice %}
+          <div class="flash notice">{{ notice }}</div>
+        {% endif %}
+        {% if error %}
+          <div class="flash error">{{ error }}</div>
+        {% endif %}
+
+        <section class="import-grid">
+          <article class="import-card import-card-wide">
+            <div class="import-card-head">
+              <div>
+                <p class="dock-label">Drop files</p>
+                <h2>Local music</h2>
+              </div>
+              <span class="import-card-kicker">Files and folders</span>
+            </div>
+            <form
+              action="{{ url_for('upload_tracks', library_id=library.id, next='import') }}"
+              method="post"
+              enctype="multipart/form-data"
+              class="upload-tray import-upload-tray"
+              data-upload-form
+              data-upload-success-url="{{ url_for('view_library', library_id=library.id) }}"
+            >
+              <div class="drawer-import-actions">
+                <label class="frame-button drawer-import-button">
+                  Import files
+                  <input type="file" name="tracks" multiple accept=".aac,.flac,.m4a,.mp3,.ogg,.opus,.wav,.wma,audio/*" data-hidden-file-input>
+                </label>
+                <label class="frame-button drawer-import-button">
+                  Import folder
+                  <input type="file" name="tracks-folder" webkitdirectory directory multiple data-hidden-directory-input>
+                </label>
+              </div>
+              <label class="upload-prompt import-dropzone" data-dropzone>
+                <span>Drop files or folders anywhere in this card.</span>
+                <small>{{ library_files_dir }}</small>
+              </label>
+            </form>
+          </article>
+
+          <article class="import-card">
+            <div class="import-card-head">
+              <div>
+                <p class="dock-label">Smart import</p>
+                <h2>YouTube</h2>
+              </div>
+              <span class="import-card-kicker">Uses `yt-dlp` or `youtube-dl`</span>
+            </div>
+            <form
+              action="{{ url_for('search_youtube_import', library_id=library.id) }}"
+              method="get"
+              class="source-import-form"
+              data-youtube-search-form
+            >
+              <label>
+                <span>Search YouTube</span>
+                <input type="search" name="q" placeholder="Artist, track, live set, or playlist" autocomplete="off" required>
+              </label>
+              <div class="source-import-actions">
+                <button type="submit" class="frame-button">Search YouTube</button>
+                <span class="import-help" data-youtube-search-status>Search results stay in this panel so you can import without copying URLs around.</span>
+              </div>
+            </form>
+            <div class="youtube-search-results" data-youtube-search-results hidden></div>
+            <form
+              action="{{ url_for('import_source', library_id=library.id, source='youtube') }}"
+              method="post"
+              class="source-import-form"
+              data-ingest-form
+              data-busy-message="Importing from YouTube..."
+              data-import-source="youtube"
+            >
+              <label>
+                <span>Video or playlist URL</span>
+                <input type="url" name="source_url" placeholder="https://www.youtube.com/watch?v=..." required data-import-url-input>
+              </label>
+              <p class="import-help">Downloads audio, adds tracks to this library, and fills missing album data from MusicBrainz when possible.</p>
+              <button type="submit" class="frame-button primary">Import from YouTube</button>
+            </form>
+          </article>
+
+          <article class="import-card">
+            <div class="import-card-head">
+              <div>
+                <p class="dock-label">Smart import</p>
+                <h2>Spotify</h2>
+              </div>
+              <span class="import-card-kicker">Uses `spotdl`</span>
+            </div>
+            <form
+              action="{{ url_for('search_spotify_import', library_id=library.id) }}"
+              method="get"
+              class="source-import-form"
+              data-spotify-search-form
+            >
+              <label>
+                <span>Search Spotify</span>
+                <input type="search" name="q" placeholder="Track, album, playlist, or artist" autocomplete="off" required>
+              </label>
+              <div class="source-import-actions">
+                <button type="submit" class="frame-button">Search Spotify</button>
+                <span class="import-help" data-spotify-search-status>Spotify search uses the official Spotify API, then imports the chosen result through spotDL.</span>
+              </div>
+            </form>
+            <div class="spotify-search-results" data-spotify-search-results hidden></div>
+            <form
+              action="{{ url_for('import_source', library_id=library.id, source='spotify') }}"
+              method="post"
+              class="source-import-form"
+              data-ingest-form
+              data-busy-message="Importing from Spotify..."
+              data-import-source="spotify"
+            >
+              <label>
+                <span>Track, album, playlist, or artist URL</span>
+                <input type="url" name="source_url" placeholder="https://open.spotify.com/track/..." required data-import-url-input>
+              </label>
+              <p class="import-help">SpotDL resolves Spotify metadata, fetches the audio source, and SongWalk stores the result in this library.</p>
+              <button type="submit" class="frame-button primary">Import from Spotify</button>
+            </form>
+          </article>
+        </section>
+
+        <section class="import-library-preview">
+          <div class="import-card-head">
+            <div>
+              <p class="dock-label">Library preview</p>
+              <h2>Latest tracks</h2>
+            </div>
+            <a class="frame-button" href="{{ url_for('view_library', library_id=library.id) }}">Open full library</a>
+          </div>
+          {% if library.tracks %}
+            <div class="import-track-list">
+              {% for track in library.tracks[:6] %}
+                <div class="import-track-row">
+                  <strong>{{ track.title or track.original_name }}</strong>
+                  <span>{{ track.artist or 'Unknown artist' }}</span>
+                  <span>{{ track.album or 'Unknown album' }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="empty-table">No tracks yet. Import something to populate the library.</div>
+          {% endif %}
+        </section>
+      </main>
+    </div>
+
+    <div class="window-drop-overlay" id="window-drop-overlay" hidden>
+      <div class="window-drop-card">
+        <p>Drop tracks to import them</p>
+        <small>{{ library_files_dir }}</small>
+      </div>
+    </div>
+
+    <div class="global-busy" id="global-busy" hidden>
+      <div class="global-busy-card">
+        <div class="global-busy-spinner"></div>
+        <p id="global-busy-text" aria-live="polite">Working...</p>
+      </div>
+    </div>
+  </body>
+</html>

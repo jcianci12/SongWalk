@@ -14,7 +14,7 @@ The product branding is `SongWalk`. The current module names, commands, and envi
 
 SongWalk is built around one idea: EASILY spin it up, create a library, copy its share URL, and send it to someone immediately.
 
-Really easy to use. Run the included scripts (quick-share.ps1) and you will have a public facing url in no time that you can share with friends! Python or docker is needed. (future feature one simple exe to run perhaps?)
+Docker Compose now starts a Cloudflare Quick Tunnel automatically, so the local `/` page shows the current public host and lets you rotate it without running a separate helper script.
 
 - Anyone with the share URL can open that library.
 - Anyone with the share URL can upload tracks and edit metadata in that library.
@@ -28,25 +28,9 @@ Looks like windows media player (In my opinion the best version)
 
 For the fastest zero-account demo flow:
 
-1. Run the quick-share launcher.
-2. Choose whether SongWalk should run in Docker or Python.
-3. Copy the printed public URL and send a library share link from there.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\quick-share.ps1
-```
-
-On Linux/macOS shells:
-
-```bash
-bash ./deploy/quick-share.sh
-```
-
-The launcher starts SongWalk, waits for it to respond, starts a Cloudflare Quick Tunnel, and prints:
-
-- The local URL
-- The public `https://...trycloudflare.com` URL
-- The private owner URL on that public host
+1. Run `docker compose up --build`.
+2. Open `http://localhost:8080/`.
+3. Use the local launch page to bring SongWalk online, then copy the public `https://...trycloudflare.com` URL and send a library share link from there.
 
 Quick Tunnels are temporary and for demos/testing only.
 
@@ -54,6 +38,8 @@ Quick Tunnels are temporary and for demos/testing only.
 
 - Create and manage libraries from a private owner dashboard URL
 - Upload audio files with drag and drop
+- Import from YouTube and Spotify into any shared library
+- Fill missing title, artist, and album tags from MusicBrainz after import
 - Share the UUID-backed library URL with collaborators
 - Edit track metadata such as title, artist, and album
 - Stream tracks from the browser
@@ -69,7 +55,9 @@ python -m songshare
 
 Open `http://localhost:8080`.
 
-If you open root directly on `localhost`, SongWalk will send you to the private owner dashboard automatically for convenience.
+For YouTube and Spotify imports in a plain Python install, make sure `ffmpeg` is available on your `PATH`. The Python requirements install `yt-dlp` and `spotdl`; `ffmpeg` still needs to come from your OS package manager or a manual install.
+
+If you open root directly on `localhost`, SongWalk now shows a local launch page with the owner dashboard link plus Quick Tunnel on/off controls and the current public host when it is online.
 
 For public hosts, tunnels, and reverse proxies, root stays in share-access mode and does not reveal library IDs.
 
@@ -95,6 +83,8 @@ In dev mode SongWalk uses Flask's reloader, disables static asset caching, and r
 - `SONGSHARE_DEV`: Enable development auto-reload mode, default `off`
 - `SONGSHARE_MAX_UPLOAD_MB`: Request size limit in MB, default `512`
 - `SONGSHARE_PROXY_HOPS`: Number of trusted reverse proxies to honor for forwarded host/proto headers, default `0`
+- `SONGSHARE_YOUTUBE_DL_BIN`: Optional override for the YouTube downloader command. Defaults to `yt-dlp` and falls back to `youtube-dl` if present.
+- `SONGSHARE_SPOTIFY_DL_BIN`: Optional override for the Spotify downloader command. Defaults to `spotdl`.
 
 ## Docker
 
@@ -102,7 +92,7 @@ In dev mode SongWalk uses Flask's reloader, disables static asset caching, and r
 docker compose up --build
 ```
 
-The compose file mounts `./songshare-data` into the container at `/data` and enables one trusted proxy hop so nginx/Traefik/Caddy can forward the public host and scheme cleanly.
+The compose file mounts `./songshare-data` into the container at `/data`, enables one trusted proxy hop so nginx/Traefik/Caddy can forward the public host and scheme cleanly, and turns on the built-in Quick Tunnel manager by default.
 
 For live-reload development inside Docker, use the dev override:
 
@@ -110,15 +100,18 @@ For live-reload development inside Docker, use the dev override:
 docker compose -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-`compose.dev.yaml` enables `SONGSHARE_DEV=1` and bind-mounts `./songshare` into `/app/songshare`, so Python, template, CSS, and JS edits are picked up without rebuilding the image each time.
+`compose.dev.yaml` enables `SONGSHARE_DEV=1`, disables the Quick Tunnel manager, and bind-mounts `./songshare` into `/app/songshare`, so Python, template, CSS, and JS edits are picked up without rebuilding the image each time.
+
+The container image now includes `ffmpeg`, `yt-dlp`, and `spotdl`, so the `/import` page works inside Docker without extra setup.
 
 ## Owner Access
 
 SongWalk separates public share access from owner management:
 
-- Direct `http://localhost:8080/` redirects to the owner dashboard for convenience.
+- Direct `http://localhost:8080/` shows a local-only launch page with owner access and Quick Tunnel controls.
 - Public `/` is a neutral landing page that does not enumerate library IDs.
 - `/s/<library-id>` is the shared library URL you send to collaborators.
+- `/s/<library-id>/import` is the dedicated import page for drag-and-drop, YouTube URLs, and Spotify URLs.
 - `/owner/<secret-token>` is the private owner dashboard for creating and deleting libraries.
 
 On startup, SongWalk writes the private owner URL to `songshare-data/owner-url.txt`. Keep that URL private.
@@ -129,21 +122,20 @@ This local-only convenience is intentionally limited to direct loopback requests
 
 ### Cloudflare Quick Tunnel
 
-For a temporary public URL without creating a Cloudflare account, run:
+Docker Compose starts a Quick Tunnel automatically now:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy\quick-share.ps1
+docker compose up --build
 ```
 
-This script prompts for `docker` or `python`, checks the required tools, starts SongWalk if needed, waits for it to become reachable, then launches a Dockerized `cloudflared` Quick Tunnel and prints a random `https://...trycloudflare.com` URL you can share immediately.
+Then open `http://localhost:8080/` locally. The launch page shows:
 
-If you prefer Bash:
+- The current public `https://...trycloudflare.com` URL
+- The owner URL on that public host
+- A button to bring SongWalk online or take it offline
+- A button to rotate the tunnel
 
-```bash
-bash ./deploy/quick-share.sh
-```
-
-In `python` mode, SongWalk runs locally and the tunnel still uses Docker for `cloudflared`, so Docker is still required.
+For plain `python -m songshare`, Quick Tunnel startup is optional. Install `cloudflared` yourself and set `SONGSHARE_QUICK_TUNNEL_ENABLED=1` if you want the same in-app behavior outside Docker.
 
 Quick Tunnels are for testing and demos only. They are temporary, have a limit of 200 in-flight requests, and do not support Server-Sent Events.
 

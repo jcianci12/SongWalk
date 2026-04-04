@@ -5,6 +5,7 @@ import secrets
 import threading
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,7 +13,98 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .album_lookup import LookupError, MusicMetadataClient
+from .importer import ImportError, ImportOutcome, ImportProgressUpdate, LibraryImportService
+from .quick_tunnel import QuickTunnelManager, QuickTunnelStatus
 from .store import LibraryNotFoundError, Store, TrackNotFoundError, UploadedTrack
+
+
+@dataclass
+class ImportJob:
+    id: str
+    library_id: str
+    source: str
+    status: str = "queued"
+    message: str = "Queued..."
+    percent: int | None = None
+    current_item: str = ""
+    complete: bool = False
+    ok: bool = False
+    error: str = ""
+    redirect_url: str = ""
+    updated_at: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "library_id": self.library_id,
+            "source": self.source,
+            "status": self.status,
+            "message": self.message,
+            "percent": self.percent,
+            "current_item": self.current_item,
+            "complete": self.complete,
+            "ok": self.ok,
+            "error": self.error,
+            "redirect_url": self.redirect_url,
+            "updated_at": self.updated_at,
+        }
+
+
+class ImportJobStore:
+    def __init__(self, *, ttl_seconds: float = 3600):
+        self._ttl_seconds = ttl_seconds
+        self._jobs: dict[str, ImportJob] = {}
+        self._lock = threading.Lock()
+
+    def create(self, *, library_id: str, source: str, message: str) -> ImportJob:
+        with self._lock:
+            self._prune_locked()
+            job = ImportJob(
+                id=str(uuid4()),
+                library_id=library_id,
+                source=source,
+                message=message,
+                updated_at=time.time(),
+            )
+            self._jobs[job.id] = job
+            return job
+
+    def update(self, job_id: str, **changes) -> ImportJob | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return None
+            for key, value in changes.items():
+                setattr(job, key, value)
+            job.updated_at = time.time()
+            return job
+
+    def finish(self, job_id: str, *, ok: bool, message: str, redirect_url: str = "", error: str = "") -> ImportJob | None:
+        return self.update(
+            job_id,
+            status="complete" if ok else "error",
+            message=message,
+            percent=100 if ok else None,
+            complete=True,
+            ok=ok,
+            error=error,
+            redirect_url=redirect_url,
+        )
+
+    def get(self, job_id: str) -> ImportJob | None:
+        with self._lock:
+            self._prune_locked()
+            return self._jobs.get(job_id)
+
+    def _prune_locked(self) -> None:
+        now = time.time()
+        expired = [
+            job_id
+            for job_id, job in self._jobs.items()
+            if job.complete and now - job.updated_at > self._ttl_seconds
+        ]
+        for job_id in expired:
+            self._jobs.pop(job_id, None)
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -30,6 +122,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         MAX_UPLOAD_MB=max_upload_mb,
         MAX_CONTENT_LENGTH=max_upload_mb * 1024 * 1024,
         PROXY_HOPS=proxy_hops,
+        QUICK_TUNNEL_ENABLED=os.getenv("SONGSHARE_QUICK_TUNNEL_ENABLED", "").lower() in {"1", "true", "yes", "on"},
     )
 
     if test_config:
@@ -53,6 +146,18 @@ def create_app(test_config: dict | None = None) -> Flask:
     store = Store(Path(app.config["DATA_DIR"]))
     app.config["STORE"] = store
     app.config.setdefault("LOOKUP_CLIENT", MusicMetadataClient())
+    app.config.setdefault("IMPORT_JOB_STORE", ImportJobStore())
+    app.config.setdefault(
+        "IMPORT_SERVICE",
+        LibraryImportService(
+            store=store,
+            lookup_client=app.config["LOOKUP_CLIENT"],
+            youtube_command=os.getenv("SONGSHARE_YOUTUBE_DL_BIN", "").strip() or None,
+            spotify_command=os.getenv("SONGSHARE_SPOTIFY_DL_BIN", "").strip() or None,
+            spotify_client_id=os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "").strip() or None,
+            spotify_client_secret=os.getenv("SONGSHARE_SPOTIFY_CLIENT_SECRET", "").strip() or None,
+        ),
+    )
     owner_token_path = app.config["DATA_DIR"] / "owner-token.txt"
     owner_token = os.getenv("SONGSHARE_OWNER_TOKEN", "").strip()
     if not owner_token:
@@ -135,6 +240,41 @@ def create_app(test_config: dict | None = None) -> Flask:
             )
         )
         return host in {"localhost", "127.0.0.1", "::1"} and not has_forwarded_headers
+
+    def require_local_access() -> None:
+        if not is_direct_local_request():
+            abort(404)
+
+    def quick_tunnel_manager() -> QuickTunnelManager | None:
+        manager = app.extensions.get("quick_tunnel_manager")
+        return manager if manager is not None and hasattr(manager, "status") else None
+
+    def quick_tunnel_status() -> dict:
+        manager = quick_tunnel_manager()
+        if manager is not None:
+            status = manager.status()
+        else:
+            status = QuickTunnelStatus(
+                enabled=bool(app.config["QUICK_TUNNEL_ENABLED"]),
+                available=False,
+                running=False,
+                public_url="",
+                service_url="",
+                message="Quick Tunnel is disabled.",
+                last_error="",
+            )
+            if status.enabled:
+                status.message = "Quick Tunnel has not started in this runtime yet."
+
+        public_owner_url = ""
+        if status.public_url:
+            public_owner_url = f"{status.public_url}{owner_path()}"
+
+        payload = status.to_dict()
+        payload["public_owner_url"] = public_owner_url
+        payload["owner_path"] = owner_path()
+        payload["state_path"] = str(Path(app.config["DATA_DIR"]) / "quick-tunnel.json")
+        return payload
 
     def require_owner_access() -> None:
         token = owner_token_from_request().strip()
@@ -223,14 +363,101 @@ def create_app(test_config: dict | None = None) -> Flask:
             return "SS"
         return "".join(words[:2])
 
+    def import_redirect_response(
+        library_id: str,
+        outcome,
+        *,
+        success_notice: str,
+        empty_error: str,
+        error_endpoint: str = "view_import",
+    ):
+        if wants_json():
+            redirect_url = url_for("view_library", library_id=library_id)
+            if outcome.ok:
+                redirect_url = url_for("view_library", library_id=library_id, notice=success_notice)
+            return (
+                jsonify(
+                    {
+                        "ok": outcome.ok,
+                        "uploaded": outcome.uploaded,
+                        "errors": outcome.errors,
+                        "redirect_url": redirect_url,
+                    }
+                ),
+                200 if outcome.ok else 400,
+            )
+
+        if outcome.ok:
+            return redirect(url_for("view_library", library_id=library_id, notice=success_notice))
+
+        error = outcome.errors[0] if outcome.errors else empty_error
+        return redirect(url_for(error_endpoint, library_id=library_id, error=error))
+
+    def start_import_job(library_id: str, *, source: str, source_url: str) -> ImportJob:
+        job_store: ImportJobStore = app.config["IMPORT_JOB_STORE"]
+        job = job_store.create(
+            library_id=library_id,
+            source=source,
+            message=f"Queued {source.title()} import...",
+        )
+
+        def progress(update: ImportProgressUpdate) -> None:
+            job_store.update(
+                job.id,
+                status=update.phase,
+                message=update.message,
+                percent=update.percent,
+                current_item=update.current_item,
+            )
+
+        def worker() -> None:
+            try:
+                progress(ImportProgressUpdate(phase="starting", message=f"Starting {source.title()} import..."))
+                if source == "youtube":
+                    outcome = app.config["IMPORT_SERVICE"].import_youtube_url(
+                        library_id,
+                        source_url,
+                        progress_callback=progress,
+                    )
+                    notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from YouTube."
+                elif source == "spotify":
+                    outcome = app.config["IMPORT_SERVICE"].import_spotify_url(
+                        library_id,
+                        source_url,
+                        progress_callback=progress,
+                    )
+                    notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from Spotify."
+                else:
+                    raise ImportError("Unsupported import source.")
+
+                if not outcome.ok:
+                    message = outcome.errors[0] if outcome.errors else "Import failed."
+                    job_store.finish(job.id, ok=False, message=message, error=message)
+                    return
+
+                with app.test_request_context():
+                    redirect_url = url_for("view_library", library_id=library_id, notice=notice)
+                job_store.finish(job.id, ok=True, message=notice, redirect_url=redirect_url)
+            except ImportError as exc:
+                message = str(exc)
+                job_store.finish(job.id, ok=False, message=message, error=message)
+
+        threading.Thread(
+            target=worker,
+            name=f"songshare-import-{job.id}",
+            daemon=True,
+        ).start()
+        return job
+
     @app.get("/")
     def home():
-        if is_direct_local_request():
-            return redirect(owner_dashboard_url())
         return render_template(
             "home.html",
             data_dir=app.config["DATA_DIR"],
             base_url=base_url(),
+            owner_dashboard_url=owner_dashboard_url(),
+            owner_path=owner_path(),
+            quick_tunnel=quick_tunnel_status(),
         )
 
     @app.get("/owner/<owner_token>")
@@ -242,7 +469,42 @@ def create_app(test_config: dict | None = None) -> Flask:
             data_dir=app.config["DATA_DIR"],
             owner_token=app.config["OWNER_TOKEN"],
             owner_path=owner_path(),
+            quick_tunnel=quick_tunnel_status(),
         )
+
+    @app.get("/quick-tunnel")
+    def view_quick_tunnel_status():
+        require_local_access()
+        return jsonify({"ok": True, "tunnel": quick_tunnel_status()})
+
+    @app.post("/quick-tunnel/rotate")
+    def quick_tunnel_rotate():
+        require_local_access()
+        manager = quick_tunnel_manager()
+        if manager is None:
+            return jsonify({"ok": False, "error": "Quick Tunnel is not available in this runtime."}), 400
+        status = manager.rotate(wait_seconds=20.0)
+        payload = quick_tunnel_status()
+        ok = bool(status.public_url) or bool(status.running)
+        return jsonify({"ok": ok, "tunnel": payload, "error": "" if ok else payload["last_error"]}), 200 if ok else 500
+
+    @app.post("/quick-tunnel/toggle")
+    def quick_tunnel_toggle():
+        require_local_access()
+        manager = quick_tunnel_manager()
+        if manager is None:
+            return jsonify({"ok": False, "error": "Quick Tunnel is not available in this runtime."}), 400
+
+        current = manager.status()
+        if current.running:
+            status = manager.stop()
+            payload = quick_tunnel_status()
+            return jsonify({"ok": True, "action": "stopped", "tunnel": payload, "error": ""})
+
+        status = manager.start(wait_seconds=20.0)
+        payload = quick_tunnel_status()
+        ok = bool(status.public_url) or bool(status.running)
+        return jsonify({"ok": ok, "action": "started" if ok else "failed", "tunnel": payload, "error": "" if ok else payload["last_error"]}), 200 if ok else 500
 
     @app.post("/libraries")
     def create_library():
@@ -293,6 +555,66 @@ def create_app(test_config: dict | None = None) -> Flask:
             track_url=track_url,
         )
 
+    @app.get("/s/<library_id>/import")
+    def view_import(library_id: str):
+        try:
+            library = store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        return render_template(
+            "import.html",
+            library=library,
+            share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
+            library_files_dir=store.library_files_dir(library.id),
+            notice=request.args.get("notice", ""),
+            error=request.args.get("error", ""),
+        )
+
+    @app.get("/s/<library_id>/import/youtube/search")
+    def search_youtube_import(library_id: str):
+        try:
+            store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        query = request.args.get("q", "").strip()
+        try:
+            results = app.config["IMPORT_SERVICE"].search_youtube(query)
+        except ImportError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        return jsonify({"ok": True, "results": results})
+
+    @app.get("/s/<library_id>/import/spotify/search")
+    def search_spotify_import(library_id: str):
+        try:
+            store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        query = request.args.get("q", "").strip()
+        try:
+            results = app.config["IMPORT_SERVICE"].search_spotify(query)
+        except ImportError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        return jsonify({"ok": True, "results": results})
+
+    @app.get("/s/<library_id>/import/jobs/<job_id>")
+    def import_job_status(library_id: str, job_id: str):
+        try:
+            store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        job_store: ImportJobStore = app.config["IMPORT_JOB_STORE"]
+        job = job_store.get(job_id)
+        if not job or job.library_id != library_id:
+            abort(404)
+
+        return jsonify({"ok": True, "job": job.to_dict()})
+
     @app.post("/s/<library_id>/upload")
     def upload_tracks(library_id: str):
         try:
@@ -307,36 +629,73 @@ def create_app(test_config: dict | None = None) -> Flask:
                 return jsonify({"ok": False, "error": message}), 400
             return redirect(url_for("view_library", library_id=library_id, error=message))
 
-        uploaded = 0
-        errors = []
+        uploads = [
+            UploadedTrack(
+                filename=file.filename,
+                content_type=file.content_type or "",
+                stream=file.stream,
+                size=file.content_length,
+            )
+            for file in files
+        ]
 
-        for file in files:
-            try:
-                store.add_track(
-                    library_id,
-                    UploadedTrack(
-                        filename=file.filename,
-                        content_type=file.content_type or "",
-                        stream=file.stream,
-                        size=file.content_length,
-                    ),
-                )
-                uploaded += 1
-            except ValueError as exc:
-                errors.append(str(exc))
-            finally:
+        try:
+            outcome = app.config["IMPORT_SERVICE"].import_uploaded_files(library_id, uploads)
+        finally:
+            for file in files:
                 file.close()
 
+        notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''}."
+        return import_redirect_response(
+            library_id,
+            outcome,
+            success_notice=notice,
+            empty_error="Upload failed.",
+            error_endpoint="view_import" if request.args.get("next", "").strip().lower() == "import" else "view_library",
+        )
+
+    @app.post("/s/<library_id>/import/<source>")
+    def import_source(library_id: str, source: str):
+        try:
+            store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        source_url = request.form.get("source_url", "").strip()
         if wants_json():
-            status = 200 if uploaded else 400
-            return jsonify({"ok": uploaded > 0, "uploaded": uploaded, "errors": errors}), status
+            if source not in {"youtube", "spotify"}:
+                abort(404)
+            if not source_url:
+                return jsonify({"ok": False, "error": "Paste a valid source URL."}), 400
 
-        if uploaded:
-            notice = f"Uploaded {uploaded} track{'s' if uploaded != 1 else ''}."
-            return redirect(url_for("view_library", library_id=library_id, notice=notice))
+            job = start_import_job(library_id, source=source, source_url=source_url)
+            return jsonify(
+                {
+                    "ok": True,
+                    "job_id": job.id,
+                    "status_url": url_for("import_job_status", library_id=library_id, job_id=job.id),
+                }
+            )
 
-        error = errors[0] if errors else "Upload failed."
-        return redirect(url_for("view_library", library_id=library_id, error=error))
+        try:
+            if source == "youtube":
+                outcome = app.config["IMPORT_SERVICE"].import_youtube_url(library_id, source_url)
+                notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from YouTube."
+            elif source == "spotify":
+                outcome = app.config["IMPORT_SERVICE"].import_spotify_url(library_id, source_url)
+                notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from Spotify."
+            else:
+                abort(404)
+        except ImportError as exc:
+            outcome = ImportOutcome(errors=[str(exc)])
+            notice = ""
+
+        return import_redirect_response(
+            library_id,
+            outcome,
+            success_notice=notice,
+            empty_error="Import failed.",
+        )
 
     @app.post("/s/<library_id>/tracks/<track_id>")
     def update_track(library_id: str, track_id: str):

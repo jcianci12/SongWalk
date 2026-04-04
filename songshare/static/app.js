@@ -1,6 +1,6 @@
 (function () {
   // Increment this whenever we need to confirm a fresh JS build is running in the browser.
-  const SCRIPT_VERSION = "2026-04-03-transport-title-1";
+  const SCRIPT_VERSION = "2026-04-03-import-progress-1";
   const DEBUG_FILTERING = true;
 
   function debugLog(scope, ...details) {
@@ -86,6 +86,29 @@
     node.textContent = fallbackText || "SS";
   }
 
+  function faviconDataUri(label) {
+    const text = encodeURIComponent((label || "SS").slice(0, 2).toUpperCase());
+    return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%232c82d3'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='24' fill='white' font-family='Segoe UI, Arial, sans-serif'%3E${text}%3C/text%3E%3C/svg%3E`;
+  }
+
+  function ensureFaviconLink() {
+    let icon = document.querySelector("link[data-dynamic-favicon]");
+    if (icon) {
+      return icon;
+    }
+
+    icon = document.createElement("link");
+    icon.setAttribute("rel", "icon");
+    icon.setAttribute("data-dynamic-favicon", "true");
+    document.head.appendChild(icon);
+    return icon;
+  }
+
+  function setFaviconFrame(coverUrl, fallbackText) {
+    const icon = ensureFaviconLink();
+    icon.setAttribute("href", coverUrl || faviconDataUri(fallbackText));
+  }
+
   const globalBusy = document.getElementById("global-busy");
   const globalBusyText = document.getElementById("global-busy-text");
   let busyDepth = 0;
@@ -129,7 +152,12 @@
     }
   }
 
-  document.querySelectorAll("[data-copy]").forEach((button) => {
+  function bindCopyButton(button) {
+    if (!button || button.dataset.copyBound === "1") {
+      return;
+    }
+
+    button.dataset.copyBound = "1";
     button.addEventListener("click", async () => {
       const value = button.getAttribute("data-copy");
       if (!value) {
@@ -143,6 +171,160 @@
         button.textContent = original;
       }, 1200);
     });
+  }
+
+  function setButtonCopyValue(button, value) {
+    if (!button) {
+      return;
+    }
+
+    const normalized = (value || "").trim();
+    if (normalized) {
+      button.disabled = false;
+      button.setAttribute("data-copy", normalized);
+      return;
+    }
+
+    button.disabled = true;
+    button.removeAttribute("data-copy");
+  }
+
+  document.querySelectorAll("[data-copy]").forEach((button) => {
+    bindCopyButton(button);
+  });
+
+  function applyQuickTunnelState(panel, tunnel) {
+    if (!panel || !tunnel) {
+      return;
+    }
+
+    const statusNode = panel.querySelector("[data-quick-tunnel-status]");
+    const publicUrlNode = panel.querySelector("[data-quick-tunnel-public-url]");
+    const ownerUrlNode = panel.querySelector("[data-quick-tunnel-owner-url]");
+    const copyPublicButton = panel.querySelector("[data-copy-quick-tunnel-url]");
+    const copyOwnerButton = panel.querySelector("[data-copy-quick-tunnel-owner-url]");
+    const toggleButton = panel.querySelector("[data-toggle-quick-tunnel]");
+    const rotateButton = panel.querySelector("[data-rotate-quick-tunnel]");
+
+    if (statusNode) {
+      statusNode.textContent = tunnel.message || tunnel.last_error || "Quick Tunnel is idle.";
+    }
+    if (publicUrlNode) {
+      publicUrlNode.textContent = tunnel.public_url || "Quick Tunnel is offline.";
+    }
+    if (ownerUrlNode) {
+      ownerUrlNode.textContent = tunnel.public_owner_url || "Bring the tunnel online to get a public owner URL.";
+    }
+
+    setButtonCopyValue(copyPublicButton, tunnel.public_url || "");
+    setButtonCopyValue(copyOwnerButton, tunnel.public_owner_url || "");
+    bindCopyButton(copyPublicButton);
+    bindCopyButton(copyOwnerButton);
+
+    if (toggleButton) {
+      toggleButton.disabled = !tunnel.enabled;
+      toggleButton.textContent = tunnel.running ? "Take SongWalk offline" : "Bring SongWalk online";
+    }
+
+    if (rotateButton) {
+      rotateButton.disabled = !(tunnel.enabled && tunnel.running);
+    }
+  }
+
+  function shouldPollQuickTunnel(tunnel) {
+    return Boolean(tunnel && tunnel.enabled && tunnel.running && !tunnel.public_url);
+  }
+
+  document.querySelectorAll("[data-quick-tunnel-panel]").forEach((panel) => {
+    const statusUrl = panel.getAttribute("data-status-url");
+    const toggleUrl = panel.getAttribute("data-toggle-url");
+    const rotateUrl = panel.getAttribute("data-rotate-url");
+    const toggleButton = panel.querySelector("[data-toggle-quick-tunnel]");
+    const rotateButton = panel.querySelector("[data-rotate-quick-tunnel]");
+    let pollTimer = null;
+    let latestTunnel = {
+      enabled: toggleButton ? !toggleButton.disabled : false,
+      running: rotateButton ? !rotateButton.disabled : false,
+      public_url: panel.querySelector("[data-quick-tunnel-public-url]")?.textContent || "",
+    };
+
+    async function refreshTunnel(url, busyMessage = "") {
+      const release = busyMessage ? showGlobalBusy(busyMessage) : () => {};
+      try {
+        const response = await fetch(url, {
+          method: url === statusUrl ? "GET" : "POST",
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "fetch",
+          },
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "Could not update the Quick Tunnel.");
+        }
+
+        latestTunnel = payload.tunnel || {};
+        applyQuickTunnelState(panel, latestTunnel);
+        schedulePoll();
+      } finally {
+        release();
+      }
+    }
+
+    function schedulePoll() {
+      if (!statusUrl) {
+        return;
+      }
+
+      if (!shouldPollQuickTunnel(latestTunnel)) {
+        if (pollTimer) {
+          window.clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        return;
+      }
+
+      if (pollTimer) {
+        return;
+      }
+
+      pollTimer = window.setInterval(async () => {
+        if (!shouldPollQuickTunnel(latestTunnel)) {
+          window.clearInterval(pollTimer);
+          pollTimer = null;
+          return;
+        }
+
+        try {
+          await refreshTunnel(statusUrl);
+        } catch (_) {
+          // Ignore transient tunnel polling failures.
+        }
+      }, 2000);
+    }
+
+    if (toggleButton && toggleUrl) {
+      toggleButton.addEventListener("click", async () => {
+        const busyMessage = latestTunnel.running ? "Taking SongWalk offline..." : "Bringing SongWalk online...";
+        try {
+          await refreshTunnel(toggleUrl, busyMessage);
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "Could not change the Quick Tunnel state.");
+        }
+      });
+    }
+
+    if (rotateButton && rotateUrl) {
+      rotateButton.addEventListener("click", async () => {
+        try {
+          await refreshTunnel(rotateUrl, "Rotating public tunnel...");
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "Could not rotate the Quick Tunnel.");
+        }
+      });
+    }
+
+    schedulePoll();
   });
 
   document.querySelectorAll("[data-delete-library-form]").forEach((form) => {
@@ -197,6 +379,320 @@
       }
 
       window.location.href = `/s/${libraryId}`;
+    });
+  }
+
+  const remoteImportShell = document.querySelector("[data-remote-import-shell]");
+  const remoteImportPhase = document.querySelector("[data-remote-import-phase]");
+  const remoteImportDetail = document.querySelector("[data-remote-import-detail]");
+  const remoteImportProgress = document.querySelector("[data-remote-import-progress]");
+  const remoteImportBar = document.querySelector("[data-remote-import-bar]");
+  const remoteImportCopy = document.querySelector("[data-remote-import-copy]");
+
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function setRemoteImportStatus({ visible = false, phase = "", detail = "", percent = null } = {}) {
+    if (!remoteImportShell) {
+      return;
+    }
+
+    remoteImportShell.hidden = !visible;
+    if (remoteImportPhase) {
+      remoteImportPhase.textContent = phase || "Working...";
+    }
+    if (remoteImportDetail) {
+      remoteImportDetail.textContent = detail || "";
+    }
+
+    if (!remoteImportProgress || !remoteImportBar || !remoteImportCopy) {
+      return;
+    }
+
+    if (typeof percent === "number") {
+      remoteImportProgress.hidden = false;
+      remoteImportBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      remoteImportBar.classList.remove("is-indeterminate");
+      remoteImportCopy.textContent = `${Math.max(0, Math.min(100, percent))}%`;
+      return;
+    }
+
+    remoteImportProgress.hidden = false;
+    remoteImportBar.style.width = "100%";
+    remoteImportBar.classList.add("is-indeterminate");
+    remoteImportCopy.textContent = "Working...";
+  }
+
+  async function startRemoteImport(form, sourceUrlOverride = "") {
+    const submitButton = form.querySelector("button[type='submit']");
+    const busyMessage = form.getAttribute("data-busy-message") || "Importing...";
+    const sourceInput = form.querySelector("[data-import-url-input]");
+    const sourceValue = sourceUrlOverride || (sourceInput ? sourceInput.value.trim() : "");
+
+    if (sourceInput && sourceUrlOverride) {
+      sourceInput.value = sourceUrlOverride;
+    }
+
+    if (!sourceValue) {
+      if (sourceInput) {
+        sourceInput.focus();
+      }
+      return;
+    }
+
+    if (submitButton) {
+      submitButton.disabled = true;
+    }
+
+    try {
+      setRemoteImportStatus({
+        visible: true,
+        phase: busyMessage,
+        detail: "Submitting import job...",
+        percent: null,
+      });
+
+      const response = await fetch(form.action, {
+        method: form.method || "POST",
+        body: new FormData(form),
+        headers: {
+          Accept: "application/json",
+          "X-Requested-With": "fetch",
+        },
+      });
+
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch (_) {
+        payload = {};
+      }
+
+      if (!response.ok || !payload.ok) {
+        throw new Error((payload.errors && payload.errors[0]) || payload.error || "Import failed.");
+      }
+
+      while (payload.status_url) {
+        const statusResponse = await fetch(payload.status_url, {
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "fetch",
+          },
+        });
+
+        const statusPayload = await statusResponse.json();
+        const job = statusPayload.job || {};
+        setRemoteImportStatus({
+          visible: true,
+          phase: job.message || busyMessage,
+          detail: job.current_item || job.status || "",
+          percent: typeof job.percent === "number" ? job.percent : null,
+        });
+
+        if (job.complete) {
+          if (!job.ok) {
+            throw new Error(job.error || job.message || "Import failed.");
+          }
+
+          window.location.href = job.redirect_url || form.getAttribute("data-success-url") || window.location.href;
+          return;
+        }
+
+        await sleep(900);
+      }
+    } catch (error) {
+      setRemoteImportStatus({
+        visible: true,
+        phase: "Import failed.",
+        detail: error instanceof Error ? error.message : "Import failed.",
+        percent: null,
+      });
+      window.alert(error instanceof Error ? error.message : "Import failed.");
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+      }
+    }
+  }
+
+  document.querySelectorAll("[data-ingest-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await startRemoteImport(form);
+    });
+  });
+
+  const youtubeSearchForm = document.querySelector("[data-youtube-search-form]");
+  const youtubeSearchResults = document.querySelector("[data-youtube-search-results]");
+  const youtubeSearchStatus = document.querySelector("[data-youtube-search-status]");
+  const youtubeImportForm = document.querySelector('[data-ingest-form][data-import-source="youtube"]');
+  const spotifySearchForm = document.querySelector("[data-spotify-search-form]");
+  const spotifySearchResults = document.querySelector("[data-spotify-search-results]");
+  const spotifySearchStatus = document.querySelector("[data-spotify-search-status]");
+  const spotifyImportForm = document.querySelector('[data-ingest-form][data-import-source="spotify"]');
+
+  function renderYoutubeSearchResults(results) {
+    if (!youtubeSearchResults) {
+      return;
+    }
+
+    if (!results.length) {
+      youtubeSearchResults.hidden = false;
+      youtubeSearchResults.innerHTML = '<div class="youtube-search-empty">No YouTube matches found.</div>';
+      return;
+    }
+
+    youtubeSearchResults.hidden = false;
+    youtubeSearchResults.innerHTML = results.map((result) => `
+      <article class="youtube-search-result">
+        <div class="youtube-search-result-media">
+          ${result.thumbnail ? `<img src="${escapeHtml(result.thumbnail)}" alt="">` : `<div class="youtube-search-result-fallback">${escapeHtml(initialsFromText(result.title || "YT"))}</div>`}
+        </div>
+        <div class="youtube-search-result-copy">
+          <strong>${escapeHtml(result.title || "Untitled result")}</strong>
+          <span>${escapeHtml(result.channel || "Unknown channel")}</span>
+          <span>${escapeHtml(result.duration || "")}</span>
+        </div>
+        <button type="button" class="frame-button" data-youtube-result-import="${escapeHtml(result.url || "")}">Import</button>
+      </article>
+    `).join("");
+
+    youtubeSearchResults.querySelectorAll("[data-youtube-result-import]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (!youtubeImportForm) {
+          return;
+        }
+        const url = button.getAttribute("data-youtube-result-import") || "";
+        await startRemoteImport(youtubeImportForm, url);
+      });
+    });
+  }
+
+  if (youtubeSearchForm) {
+    youtubeSearchForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const searchInput = youtubeSearchForm.querySelector("input[name='q']");
+      const query = searchInput ? searchInput.value.trim() : "";
+      if (!query) {
+        if (searchInput) {
+          searchInput.focus();
+        }
+        return;
+      }
+
+      if (youtubeSearchStatus) {
+        youtubeSearchStatus.textContent = "Searching YouTube...";
+      }
+
+      try {
+        const params = new URLSearchParams({ q: query });
+        const response = await fetch(`${youtubeSearchForm.action}?${params.toString()}`, {
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "fetch",
+          },
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "YouTube search failed.");
+        }
+
+        if (youtubeSearchStatus) {
+          youtubeSearchStatus.textContent = `${payload.results.length} result${payload.results.length === 1 ? "" : "s"} ready to import.`;
+        }
+        renderYoutubeSearchResults(payload.results || []);
+      } catch (error) {
+        if (youtubeSearchStatus) {
+          youtubeSearchStatus.textContent = error instanceof Error ? error.message : "YouTube search failed.";
+        }
+        if (youtubeSearchResults) {
+          youtubeSearchResults.hidden = true;
+          youtubeSearchResults.innerHTML = "";
+        }
+      }
+    });
+  }
+
+  function renderSpotifySearchResults(results) {
+    if (!spotifySearchResults) {
+      return;
+    }
+
+    if (!results.length) {
+      spotifySearchResults.hidden = false;
+      spotifySearchResults.innerHTML = '<div class="spotify-search-empty">No Spotify matches found.</div>';
+      return;
+    }
+
+    spotifySearchResults.hidden = false;
+    spotifySearchResults.innerHTML = results.map((result) => `
+      <article class="spotify-search-result">
+        <div class="spotify-search-result-media">
+          ${result.thumbnail ? `<img src="${escapeHtml(result.thumbnail)}" alt="">` : `<div class="spotify-search-result-fallback">${escapeHtml(initialsFromText(result.title || "SP"))}</div>`}
+        </div>
+        <div class="spotify-search-result-copy">
+          <strong>${escapeHtml(result.title || "Untitled result")}</strong>
+          <span>${escapeHtml(result.subtitle || result.kind || "")}</span>
+          <span>${escapeHtml(result.kind || "")}</span>
+        </div>
+        <button type="button" class="frame-button" data-spotify-result-import="${escapeHtml(result.url || "")}">Import</button>
+      </article>
+    `).join("");
+
+    spotifySearchResults.querySelectorAll("[data-spotify-result-import]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (!spotifyImportForm) {
+          return;
+        }
+        const url = button.getAttribute("data-spotify-result-import") || "";
+        await startRemoteImport(spotifyImportForm, url);
+      });
+    });
+  }
+
+  if (spotifySearchForm) {
+    spotifySearchForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const searchInput = spotifySearchForm.querySelector("input[name='q']");
+      const query = searchInput ? searchInput.value.trim() : "";
+      if (!query) {
+        if (searchInput) {
+          searchInput.focus();
+        }
+        return;
+      }
+
+      if (spotifySearchStatus) {
+        spotifySearchStatus.textContent = "Searching Spotify...";
+      }
+
+      try {
+        const params = new URLSearchParams({ q: query });
+        const response = await fetch(`${spotifySearchForm.action}?${params.toString()}`, {
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "fetch",
+          },
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "Spotify search failed.");
+        }
+
+        if (spotifySearchStatus) {
+          spotifySearchStatus.textContent = `${payload.results.length} result${payload.results.length === 1 ? "" : "s"} ready to import.`;
+        }
+        renderSpotifySearchResults(payload.results || []);
+      } catch (error) {
+        if (spotifySearchStatus) {
+          spotifySearchStatus.textContent = error instanceof Error ? error.message : "Spotify search failed.";
+        }
+        if (spotifySearchResults) {
+          spotifySearchResults.hidden = true;
+          spotifySearchResults.innerHTML = "";
+        }
+      }
     });
   }
 
@@ -381,12 +877,12 @@
 
         if (payload.ok) {
           setUploadProgress(totalBytes || 1, totalBytes || 1);
-          setUploadState("Upload complete. Refreshing library...", true);
+          setUploadState("Upload complete. Updating view...", true);
           const elapsed = performance.now() - startedAt;
           if (elapsed < 450) {
             await new Promise((resolve) => window.setTimeout(resolve, 450 - elapsed));
           }
-          window.location.reload();
+          window.location.href = payload.redirect_url || uploadForm.getAttribute("data-upload-success-url") || window.location.href;
           return;
         }
 
@@ -518,6 +1014,9 @@
   const playButton = document.querySelector("[data-transport-play]");
   const nextButton = document.querySelector("[data-transport-next]");
   const repeatButton = document.querySelector("[data-transport-repeat]");
+  const progressInput = document.querySelector("[data-transport-progress]");
+  const currentTimeTarget = document.querySelector("[data-transport-current]");
+  const durationTarget = document.querySelector("[data-transport-duration]");
   const contextMenu = document.getElementById("track-context-menu");
   const contextEditField = document.getElementById("context-edit-field");
   const contextFindAlbumInfo = document.getElementById("context-find-album-info");
@@ -611,10 +1110,18 @@
     return currentPlaybackRow() || (selectedRows.length === 1 ? selectedRow : null);
   }
 
+  function syncFavicon(fallbackText = "SS") {
+    const track = trackStateFromRow(documentTitleTrack());
+    const coverUrl = track ? track.coverUrl : "";
+    const fallback = track ? (track.coverInitials || initialsFromText(track.album || track.title || fallbackText)) : fallbackText;
+    setFaviconFrame(coverUrl, fallback);
+  }
+
   // Keep the browser tab tied to the active track instead of selection-only state.
   function syncDocumentTitle(fallbackTitle = defaultDocumentTitle) {
     const track = trackStateFromRow(documentTitleTrack());
     document.title = (track && track.title) || fallbackTitle;
+    syncFavicon();
   }
 
   function setTogglePressed(button, pressed) {
@@ -903,6 +1410,52 @@
 
     playButton.innerHTML = player.paused ? "&#9654;" : "&#10074;&#10074;";
     updateMediaSessionPlaybackState();
+  }
+
+  function formatPlaybackTime(value) {
+    if (!Number.isFinite(value) || value < 0) {
+      return "0:00";
+    }
+
+    const totalSeconds = Math.floor(value);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function syncTransportProgress() {
+    const hasSource = Boolean(player && player.getAttribute("src"));
+    const duration = player && Number.isFinite(player.duration) && player.duration > 0 ? player.duration : 0;
+    const currentTime = player && Number.isFinite(player.currentTime) ? Math.min(player.currentTime, duration || player.currentTime) : 0;
+
+    if (currentTimeTarget) {
+      currentTimeTarget.textContent = formatPlaybackTime(currentTime);
+    }
+
+    if (durationTarget) {
+      durationTarget.textContent = formatPlaybackTime(duration);
+    }
+
+    if (!progressInput) {
+      return;
+    }
+
+    if (!hasSource || duration <= 0) {
+      progressInput.disabled = true;
+      progressInput.max = "100";
+      progressInput.value = "0";
+      return;
+    }
+
+    progressInput.disabled = false;
+    progressInput.max = String(duration);
+    progressInput.value = String(currentTime);
   }
 
   function hideContextMenu() {
@@ -1844,6 +2397,28 @@
       updateMediaSessionPositionState();
     });
 
+    if (progressInput) {
+      progressInput.addEventListener("input", () => {
+        if (progressInput.disabled) {
+          return;
+        }
+
+        const nextTime = Number.parseFloat(progressInput.value);
+        if (!Number.isFinite(nextTime)) {
+          return;
+        }
+
+        if (typeof player.fastSeek === "function") {
+          player.fastSeek(nextTime);
+        } else {
+          player.currentTime = nextTime;
+        }
+
+        syncTransportProgress();
+        updateMediaSessionPositionState();
+      });
+    }
+
     playButton.addEventListener("click", async () => {
       if (!selectedRow && rows.length) {
         selectRow(visibleRows()[0] || rows[0], false);
@@ -1899,6 +2474,11 @@
     player.addEventListener("play", updatePlayButton);
     player.addEventListener("pause", updatePlayButton);
     player.addEventListener("loadedmetadata", () => {
+      syncTransportProgress();
+      updateMediaSessionPositionState();
+    });
+    player.addEventListener("timeupdate", () => {
+      syncTransportProgress();
       updateMediaSessionPositionState();
     });
     player.addEventListener("ended", () => {
@@ -1910,11 +2490,13 @@
 
       player.pause();
       player.currentTime = 0;
+      syncTransportProgress();
       updateMediaSessionPositionState();
       updatePlayButton();
     });
     player.addEventListener("ratechange", updateMediaSessionPositionState);
     player.addEventListener("emptied", () => {
+      syncTransportProgress();
       syncDocumentTitle();
       syncMediaSession();
     });
@@ -1926,6 +2508,7 @@
       updateMediaSessionPositionState();
     }
 
+    syncTransportProgress();
     updatePlayButton();
   }
 

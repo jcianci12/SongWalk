@@ -1,0 +1,28 @@
+<section
+  class="share-entry-card quick-tunnel-card"
+  data-quick-tunnel-panel
+  data-status-url="{{ url_for('view_quick_tunnel_status') }}"
+  data-toggle-url="{{ url_for('quick_tunnel_toggle') }}"
+  data-rotate-url="{{ url_for('quick_tunnel_rotate') }}"
+>
+  <p class="dock-label">Cloudflare Quick Tunnel</p>
+  <p class="share-entry-lead">Turn the public host on when you want SongWalk online, turn it off when you are done, and rotate it any time while it is live.</p>
+  <p class="status-line" data-quick-tunnel-status>{{ quick_tunnel.message }}</p>
+
+  <div class="share-example-shell">
+    <p class="dock-label">Public URL</p>
+    <code data-quick-tunnel-public-url>{% if quick_tunnel.public_url %}{{ quick_tunnel.public_url }}{% else %}Quick Tunnel is offline.{% endif %}</code>
+  </div>
+
+  <div class="share-example-shell">
+    <p class="dock-label">Owner URL on public host</p>
+    <code data-quick-tunnel-owner-url>{% if quick_tunnel.public_owner_url %}{{ quick_tunnel.public_owner_url }}{% else %}Bring the tunnel online to get a public owner URL.{% endif %}</code>
+  </div>
+
+  <div class="quick-tunnel-actions">
+    <button type="button" class="frame-button primary" data-toggle-quick-tunnel {% if not quick_tunnel.enabled %}disabled{% endif %}>{% if quick_tunnel.running %}Take SongWalk offline{% else %}Bring SongWalk online{% endif %}</button>
+    <button type="button" class="frame-button" data-rotate-quick-tunnel {% if not quick_tunnel.running %}disabled{% endif %}>Rotate tunnel</button>
+    <button type="button" class="frame-button" data-copy-quick-tunnel-url {% if not quick_tunnel.public_url %}disabled{% endif %}>Copy public URL</button>
+    <button type="button" class="frame-button" data-copy-quick-tunnel-owner-url {% if not quick_tunnel.public_owner_url %}disabled{% endif %}>Copy owner URL</button>
+  </div>
+</section>

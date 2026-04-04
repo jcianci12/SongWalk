@@ -21,7 +21,11 @@
 
       <div class="menu-band">
         <div class="menu-links">
-          <span>Open a specific shared library by pasting its URL or UUID.</span>
+          {% if local_access_mode %}
+            <span>Local launch page for opening the owner dashboard and sharing the current public tunnel.</span>
+          {% else %}
+            <span>Open a specific shared library by pasting its URL or UUID.</span>
+          {% endif %}
         </div>
         <form class="share-jump" data-open-share>
           <input type="text" name="target" placeholder="Paste a share URL or UUID">
@@ -33,24 +37,52 @@
         <main class="content-pane">
           <div class="view-band">
             <div>
-              <p class="view-caption">Direct access only</p>
-              <h1>Open a shared library</h1>
+              {% if local_access_mode %}
+                <p class="view-caption">Local launchpad</p>
+                <h1>Share SongWalk from this machine</h1>
+              {% else %}
+                <p class="view-caption">Direct access only</p>
+                <h1>Open a shared library</h1>
+              {% endif %}
             </div>
           </div>
 
           <div class="info-strip">
             <span>Storage root: <code>{{ data_dir }}</code></span>
-            <span>This page does not reveal any existing library IDs.</span>
+            {% if local_access_mode %}
+              <span>Keep <code>{{ owner_path }}</code> private. It grants library management access.</span>
+            {% else %}
+              <span>This page does not reveal any existing library IDs.</span>
+            {% endif %}
           </div>
 
-          <section class="share-entry-card">
-            <p class="share-entry-lead">Ask the sender for a full share URL, then paste it above to open that library directly.</p>
-            <div class="share-example-shell">
-              <p class="dock-label">Example format</p>
-              <code>{{ base_url }}/s/12345678-1234-1234-1234-123456789abc</code>
-            </div>
-            <p class="share-entry-note">Anyone who knows a library URL can open that library, but this landing page does not enumerate shares.</p>
-          </section>
+          {% if local_access_mode %}
+            <section class="local-launch-grid">
+              <section class="share-entry-card">
+                <p class="dock-label">Owner access</p>
+                <p class="share-entry-lead">Use the owner dashboard to create libraries, copy share links, and manage uploads.</p>
+                <div class="share-example-shell">
+                  <p class="dock-label">Private owner path</p>
+                  <code>{{ owner_path }}</code>
+                </div>
+                <div class="quick-tunnel-actions">
+                  <a class="frame-button primary" href="{{ owner_dashboard_url }}">Open owner dashboard</a>
+                  <button type="button" class="frame-button" data-copy="{{ owner_path }}">Copy owner path</button>
+                </div>
+                <p class="share-entry-note">The public share host below changes whenever the tunnel rotates. The owner path stays the same.</p>
+              </section>
+              {% include '_quick_tunnel_panel.html' %}
+            </section>
+          {% else %}
+            <section class="share-entry-card">
+              <p class="share-entry-lead">Ask the sender for a full share URL, then paste it above to open that library directly.</p>
+              <div class="share-example-shell">
+                <p class="dock-label">Example format</p>
+                <code>{{ base_url }}/s/12345678-1234-1234-1234-123456789abc</code>
+              </div>
+              <p class="share-entry-note">Anyone who knows a library URL can open that library, but this landing page does not enumerate shares.</p>
+            </section>
+          {% endif %}
         </main>
       </div>
     </div>

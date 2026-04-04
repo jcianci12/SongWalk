@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import io
+import time
 import unittest
 import uuid
 from pathlib import Path
 
 from songshare.album_lookup import LookupCandidate
 from songshare import create_app
+from songshare.importer import ImportOutcome
+from songshare.quick_tunnel import QuickTunnelStatus
 
 
 def _resolve_test_tmp_root() -> Path:
@@ -48,6 +51,122 @@ class FakeLookupClient:
 
     def fetch_cover_art(self, *, release_id: str, release_group_id: str):
         return b"fake-cover", ".jpg"
+
+
+class FakeImportService:
+    def __init__(self, store):
+        self.store = store
+        self.calls: list[tuple[str, str]] = []
+
+    def import_uploaded_files(self, library_id: str, uploads):
+        raise AssertionError("File uploads should use the real import service in this test.")
+
+    def import_youtube_url(self, library_id: str, source_url: str, *, progress_callback=None):
+        self.calls.append(("youtube", source_url))
+        if progress_callback:
+            progress_callback(type("Progress", (), {"phase": "downloading", "message": "Downloading YouTube audio...", "percent": 42, "current_item": "Demo video"})())
+        track = self.store.add_track(
+            library_id,
+            uploaded_track=_uploaded_track("youtube-import.mp3"),
+        )
+        return ImportOutcome(uploaded=1, tracks=[track])
+
+    def import_spotify_url(self, library_id: str, source_url: str, *, progress_callback=None):
+        self.calls.append(("spotify", source_url))
+        if progress_callback:
+            progress_callback(type("Progress", (), {"phase": "downloading", "message": "Resolving Spotify track...", "percent": None, "current_item": "Demo track"})())
+        track = self.store.add_track(
+            library_id,
+            uploaded_track=_uploaded_track("spotify-import.mp3"),
+        )
+        return ImportOutcome(uploaded=1, tracks=[track])
+
+    def search_youtube(self, query: str, *, limit: int = 6):
+        self.calls.append(("youtube-search", query))
+        return [
+            {
+                "title": "Demo result",
+                "channel": "Demo channel",
+                "duration": "3:21",
+                "thumbnail": "https://example.test/thumb.jpg",
+                "url": "https://www.youtube.com/watch?v=demo123",
+            }
+        ]
+
+    def search_spotify(self, query: str, *, limit: int = 6):
+        self.calls.append(("spotify-search", query))
+        return [
+            {
+                "kind": "track",
+                "title": "Demo Spotify Result",
+                "subtitle": "Demo Artist · Demo Album",
+                "thumbnail": "https://example.test/spotify.jpg",
+                "url": "https://open.spotify.com/track/demo123",
+            }
+        ]
+
+
+class FakeQuickTunnelManager:
+    def __init__(self, public_url: str = "https://demo.trycloudflare.com"):
+        self._status = QuickTunnelStatus(
+            enabled=True,
+            available=True,
+            running=True,
+            public_url=public_url,
+            service_url="http://127.0.0.1:8080",
+            message="Cloudflare Quick Tunnel ready.",
+        )
+        self.start_calls = 0
+        self.stop_calls = 0
+        self.rotate_calls = 0
+
+    def status(self):
+        return QuickTunnelStatus(**self._status.to_dict())
+
+    def start(self, *, wait_seconds: float = 20.0):
+        self.start_calls += 1
+        self._status.running = True
+        self._status.public_url = f"https://started-{self.start_calls}.trycloudflare.com"
+        self._status.message = "Cloudflare Quick Tunnel ready."
+        return self.status()
+
+    def stop(self, *, clear_message: bool = True):
+        self.stop_calls += 1
+        self._status.running = False
+        self._status.public_url = ""
+        self._status.message = "Quick Tunnel stopped."
+        return self.status()
+
+    def rotate(self, *, wait_seconds: float = 20.0):
+        self.rotate_calls += 1
+        self._status.public_url = f"https://rotated-{self.rotate_calls}.trycloudflare.com"
+        self._status.message = "Cloudflare Quick Tunnel ready."
+        return self.status()
+
+
+def _uploaded_track(filename: str):
+    from songshare.store import UploadedTrack
+
+    return UploadedTrack(
+        filename=filename,
+        content_type="audio/mpeg",
+        stream=io.BytesIO(b"FAKE-import-track"),
+    )
+
+
+def wait_for_import_job(client, status_url: str) -> dict:
+    deadline = time.time() + 2
+    last_payload = {}
+    while time.time() < deadline:
+        response = client.get(
+            status_url,
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        last_payload = response.get_json()
+        if last_payload["job"]["complete"]:
+            return last_payload
+        time.sleep(0.05)
+    return last_payload
 
 
 class SongshareAppTestCase(unittest.TestCase):
@@ -101,10 +220,12 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"Open a shared library", page.data)
         self.assertIn(b"/s/12345678-1234-1234-1234-123456789abc", page.data)
 
-    def test_local_root_redirects_to_owner_dashboard(self) -> None:
+    def test_local_root_renders_owner_launch_panel(self) -> None:
         response = self.client.get("/", follow_redirects=False)
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"], f"/owner/{self.owner_token}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Share SongWalk from this machine", response.data)
+        self.assertIn(f'href="/owner/{self.owner_token}"'.encode(), response.data)
+        self.assertIn(self.app.config["OWNER_PATH"].encode(), response.data)
 
     def test_dev_reload_endpoint_enabled_in_dev_mode(self) -> None:
         app = create_app(
@@ -265,9 +386,7 @@ class SongshareAppTestCase(unittest.TestCase):
 
         page = self.client.get(library_path)
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"drawer-import-button", page.data)
-        self.assertIn(b"data-hidden-file-input", page.data)
-        self.assertIn(b"data-hidden-directory-input", page.data)
+        self.assertIn(f'href="{library_path}/import"'.encode(), page.data)
         self.assertIn(b"toggle-library-drawer", page.data)
 
     def test_track_view_marks_target_album_section(self) -> None:
@@ -294,9 +413,26 @@ class SongshareAppTestCase(unittest.TestCase):
         page = self.client.get(library_path)
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"drawer-handle-button", page.data)
-        self.assertIn(b"drawer-import-actions", page.data)
+        self.assertEqual(page.data.count(b'href="/s/'), 3)
+        self.assertEqual(page.data.count(b">Import<"), 1)
         self.assertIn(b"Search tracks and albums", page.data)
         self.assertIn(b"data-upload-status-shell", page.data)
+
+    def test_import_page_renders_all_sources(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        page = self.client.get(f"{library_path}/import")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"data-dynamic-favicon", page.data)
+        self.assertIn(b"Import from YouTube", page.data)
+        self.assertIn(b"Import from Spotify", page.data)
+        self.assertIn(b"data-upload-form", page.data)
+        self.assertIn(b"data-ingest-form", page.data)
+        self.assertIn(b"data-youtube-search-form", page.data)
+        self.assertIn(b"data-spotify-search-form", page.data)
+        self.assertIn(b"data-spotify-search-results", page.data)
+        self.assertIn(b"data-remote-import-shell", page.data)
 
     def test_library_view_does_not_expose_other_library_ids(self) -> None:
         first_response = self.create_library()
@@ -342,6 +478,139 @@ class SongshareAppTestCase(unittest.TestCase):
         updated_library = self.app.config["STORE"].get_library(library_id)
         self.assertEqual(updated_library.tracks[0].rating, 5)
 
+    def test_youtube_import_endpoint_uses_import_service(self) -> None:
+        temp_dir = new_test_dir()
+        app = create_app(
+            {
+                "TESTING": True,
+                "DATA_DIR": temp_dir,
+                "BASE_URL": "http://localhost:8080",
+                "LOOKUP_CLIENT": FakeLookupClient(),
+            }
+        )
+        app.config["IMPORT_SERVICE"] = FakeImportService(app.config["STORE"])
+        client = app.test_client()
+        owner_token = app.config["OWNER_TOKEN"]
+
+        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        library_path = create_response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        response = client.post(
+            f"/s/{library_id}/import/youtube",
+            data={"source_url": "https://www.youtube.com/watch?v=demo"},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("job_id", payload)
+        self.assertIn("/import/jobs/", payload["status_url"])
+
+        status_response = client.get(
+            payload["status_url"],
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = wait_for_import_job(client, payload["status_url"])
+        self.assertEqual(status_payload["job"]["source"], "youtube")
+        self.assertTrue(status_payload["job"]["ok"])
+        self.assertEqual(len(app.config["STORE"].get_library(library_id).tracks), 1)
+        self.assertEqual(
+            app.config["IMPORT_SERVICE"].calls,
+            [("youtube", "https://www.youtube.com/watch?v=demo")],
+        )
+
+    def test_spotify_import_endpoint_uses_import_service(self) -> None:
+        temp_dir = new_test_dir()
+        app = create_app(
+            {
+                "TESTING": True,
+                "DATA_DIR": temp_dir,
+                "BASE_URL": "http://localhost:8080",
+                "LOOKUP_CLIENT": FakeLookupClient(),
+            }
+        )
+        app.config["IMPORT_SERVICE"] = FakeImportService(app.config["STORE"])
+        client = app.test_client()
+        owner_token = app.config["OWNER_TOKEN"]
+
+        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        library_path = create_response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        response = client.post(
+            f"/s/{library_id}/import/spotify",
+            data={"source_url": "https://open.spotify.com/track/demo"},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("job_id", payload)
+        self.assertIn("/import/jobs/", payload["status_url"])
+        status_payload = wait_for_import_job(client, payload["status_url"])
+        self.assertTrue(status_payload["job"]["ok"])
+        self.assertEqual(
+            app.config["IMPORT_SERVICE"].calls,
+            [("spotify", "https://open.spotify.com/track/demo")],
+        )
+        self.assertEqual(len(app.config["STORE"].get_library(library_id).tracks), 1)
+
+    def test_youtube_search_endpoint_returns_results(self) -> None:
+        temp_dir = new_test_dir()
+        app = create_app(
+            {
+                "TESTING": True,
+                "DATA_DIR": temp_dir,
+                "BASE_URL": "http://localhost:8080",
+                "LOOKUP_CLIENT": FakeLookupClient(),
+            }
+        )
+        app.config["IMPORT_SERVICE"] = FakeImportService(app.config["STORE"])
+        client = app.test_client()
+        owner_token = app.config["OWNER_TOKEN"]
+
+        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        library_path = create_response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        response = client.get(
+            f"/s/{library_id}/import/youtube/search?q=demo%20song",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["results"][0]["url"], "https://www.youtube.com/watch?v=demo123")
+
+    def test_spotify_search_endpoint_returns_results(self) -> None:
+        temp_dir = new_test_dir()
+        app = create_app(
+            {
+                "TESTING": True,
+                "DATA_DIR": temp_dir,
+                "BASE_URL": "http://localhost:8080",
+                "LOOKUP_CLIENT": FakeLookupClient(),
+            }
+        )
+        app.config["IMPORT_SERVICE"] = FakeImportService(app.config["STORE"])
+        client = app.test_client()
+        owner_token = app.config["OWNER_TOKEN"]
+
+        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        library_path = create_response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        response = client.get(
+            f"/s/{library_id}/import/spotify/search?q=demo%20song",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["results"][0]["url"], "https://open.spotify.com/track/demo123")
+
     def test_owner_dashboard_uses_forwarded_https_headers_for_share_links(self) -> None:
         app = create_app(
             {
@@ -386,6 +655,62 @@ class SongshareAppTestCase(unittest.TestCase):
     def test_create_library_requires_owner_token(self) -> None:
         response = self.client.post("/libraries", follow_redirects=False)
         self.assertEqual(response.status_code, 404)
+
+    def test_quick_tunnel_status_requires_direct_local_access(self) -> None:
+        response = self.client.get("/quick-tunnel", base_url="http://music.example.com")
+        self.assertEqual(response.status_code, 404)
+
+    def test_quick_tunnel_status_uses_manager_payload(self) -> None:
+        manager = FakeQuickTunnelManager()
+        self.app.extensions["quick_tunnel_manager"] = manager
+
+        response = self.client.get("/quick-tunnel")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["tunnel"]["public_url"], "https://demo.trycloudflare.com")
+        self.assertEqual(
+            payload["tunnel"]["public_owner_url"],
+            f"https://demo.trycloudflare.com{self.app.config['OWNER_PATH']}",
+        )
+
+    def test_quick_tunnel_rotate_uses_manager(self) -> None:
+        manager = FakeQuickTunnelManager()
+        self.app.extensions["quick_tunnel_manager"] = manager
+
+        response = self.client.post("/quick-tunnel/rotate")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(manager.rotate_calls, 1)
+        self.assertEqual(payload["tunnel"]["public_url"], "https://rotated-1.trycloudflare.com")
+
+    def test_quick_tunnel_toggle_stops_running_tunnel(self) -> None:
+        manager = FakeQuickTunnelManager()
+        self.app.extensions["quick_tunnel_manager"] = manager
+
+        response = self.client.post("/quick-tunnel/toggle")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "stopped")
+        self.assertEqual(manager.stop_calls, 1)
+        self.assertFalse(payload["tunnel"]["running"])
+        self.assertEqual(payload["tunnel"]["public_url"], "")
+
+    def test_quick_tunnel_toggle_starts_stopped_tunnel(self) -> None:
+        manager = FakeQuickTunnelManager()
+        manager.stop()
+        self.app.extensions["quick_tunnel_manager"] = manager
+
+        response = self.client.post("/quick-tunnel/toggle")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "started")
+        self.assertEqual(manager.start_calls, 1)
+        self.assertTrue(payload["tunnel"]["running"])
+        self.assertEqual(payload["tunnel"]["public_url"], "https://started-1.trycloudflare.com")
 
 
 if __name__ == "__main__":

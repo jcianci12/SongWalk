@@ -49,6 +49,12 @@
             <span>Keep <code>{{ owner_path }}</code> private. It grants library management access.</span>
           </div>
 
+          {% if local_access_mode %}
+            <div class="owner-dashboard-panel">
+              {% include '_quick_tunnel_panel.html' %}
+            </div>
+          {% endif %}
+
           <div class="table-shell">
             <div class="table-head library-table-head">
               <span>Name</span>

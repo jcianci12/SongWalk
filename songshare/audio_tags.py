@@ -48,7 +48,14 @@ def write_mp3_metadata(file_path: Path, *, title: str, artist: str, album: str, 
     _set_text_frame(tags, "TPE1", TPE1, artist)
     _set_text_frame(tags, "TALB", TALB, album)
     _set_rating(tags, rating)
-    tags.save(file_path, v2_version=3)
+    try:
+        tags.save(file_path, v2_version=3)
+    except Exception:
+        _strip_broken_id3_header(file_path)
+        try:
+            tags.save(file_path, v2_version=3)
+        except Exception:
+            return
 
 
 def clamp_rating(value: int | str | None) -> int:
@@ -103,3 +110,21 @@ def _stars_from_popm_value(value: int) -> int:
     if value >= 1:
         return 1
     return 0
+
+
+def _strip_broken_id3_header(file_path: Path) -> None:
+    payload = file_path.read_bytes()
+    if len(payload) < 10 or payload[:3] != b"ID3":
+        return
+
+    size = _syncsafe_int(payload[6:10])
+    file_path.write_bytes(payload[10 + size :])
+
+
+def _syncsafe_int(value: bytes) -> int:
+    return (
+        ((value[0] & 0x7F) << 21)
+        | ((value[1] & 0x7F) << 14)
+        | ((value[2] & 0x7F) << 7)
+        | (value[3] & 0x7F)
+    )

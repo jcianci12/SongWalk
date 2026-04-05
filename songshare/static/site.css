@@ -829,6 +829,49 @@ body.is-window-drop-active .window-drop-card {
   padding: 0 18px 18px;
 }
 
+.collection-studio {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid #dbe6f2;
+  background: linear-gradient(180deg, #ffffff, #f6fbff);
+}
+
+.collection-studio-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+}
+
+.collection-selection-summary {
+  margin: 0;
+  color: var(--text-soft);
+}
+
+.collection-studio-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.collection-studio-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.collection-studio-form input,
+.collection-studio-form select {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #b8cade;
+  background: #fff;
+  color: var(--text-main);
+}
+
 .table-head {
   display: grid;
   gap: 12px;
@@ -854,6 +897,130 @@ body.is-window-drop-active .window-drop-card {
   gap: 18px;
 }
 
+.collection-cover-card {
+  align-content: start;
+}
+
+.album-cover-card,
+.collection-album-entry {
+  position: relative;
+}
+
+.album-select-button {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  padding: 4px 8px;
+  border: 1px solid var(--chrome-line-strong);
+  background: linear-gradient(180deg, #fefefe, #d7e5f4);
+  color: var(--text-main);
+  cursor: pointer;
+}
+
+.collection-select-button {
+  position: static;
+  justify-self: start;
+  margin: 0 10px 10px;
+}
+
+[data-selectable-album].is-group-selected {
+  box-shadow: inset 0 0 0 2px rgba(47, 128, 207, 0.38);
+  background: linear-gradient(180deg, #fafdff, #e8f3ff);
+}
+
+.collection-cover-stack {
+  position: relative;
+  min-height: 188px;
+  margin-bottom: 6px;
+}
+
+.collection-cover-layer {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.18s ease, opacity 0.18s ease;
+}
+
+.collection-cover-layer:nth-child(1) {
+  z-index: 3;
+}
+
+.collection-cover-layer:nth-child(2) {
+  z-index: 2;
+  transform: translate(14px, 10px) rotate(3deg);
+  opacity: 0.92;
+}
+
+.collection-cover-layer:nth-child(3) {
+  z-index: 1;
+  transform: translate(28px, 18px) rotate(6deg);
+  opacity: 0.84;
+}
+
+.collection-cover-card.is-open .collection-cover-layer:nth-child(2),
+.collection-cover-card:hover .collection-cover-layer:nth-child(2) {
+  transform: translate(18px, 12px) rotate(4deg);
+}
+
+.collection-cover-card.is-open .collection-cover-layer:nth-child(3),
+.collection-cover-card:hover .collection-cover-layer:nth-child(3) {
+  transform: translate(36px, 22px) rotate(8deg);
+}
+
+.collection-cover-art,
+.collection-child-art {
+  width: 100%;
+  height: 100%;
+}
+
+.collection-album-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.collection-album-list[hidden] {
+  display: none !important;
+}
+
+.collection-album-entry {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #dbe6f2;
+  background: linear-gradient(180deg, #ffffff, #f7fbff);
+}
+
+.collection-album-link {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.collection-album-link:hover,
+.collection-album-link:focus-visible {
+  border-color: #a8c6e6;
+  background: linear-gradient(180deg, #ffffff, #edf5fd);
+}
+
+.collection-album-art {
+  width: 52px;
+  height: 52px;
+}
+
+.collection-album-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.collection-album-copy span {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
 .library-row {
   display: grid;
   gap: 12px;
@@ -872,6 +1039,38 @@ body.is-window-drop-active .window-drop-card {
 .library-link {
   color: var(--accent-strong);
   text-decoration: none;
+}
+
+.library-row-main,
+.library-label-stack,
+.library-rename-form,
+.owner-create-form {
+  display: grid;
+  gap: 8px;
+}
+
+.owner-create-form {
+  grid-auto-flow: column;
+  align-items: center;
+}
+
+.owner-create-form input,
+.library-rename-form input {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #b8cade;
+  background: #fff;
+  color: var(--text-main);
+}
+
+.library-id-note,
+.library-id-inline {
+  color: var(--text-soft);
+  font-size: 0.85rem;
+}
+
+.library-id-note {
+  width: fit-content;
 }
 
 .row-actions {
@@ -927,6 +1126,10 @@ body.is-window-drop-active .window-drop-card {
 .path-cell {
   overflow-wrap: anywhere;
   color: var(--text-soft);
+}
+
+.library-id-inline {
+  margin: 4px 0 0;
 }
 
 .media-head {

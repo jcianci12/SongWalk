@@ -4,7 +4,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ library.id }}</title>
+    <title>{{ library.display_name }}</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%232c82d3'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='24' fill='white' font-family='Segoe UI, Arial, sans-serif'%3ESS%3C/text%3E%3C/svg%3E" data-dynamic-favicon>
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
@@ -15,9 +15,9 @@
         <div class="title-band-left">
           {% include '_brand.html' %}
           {% if local_access_mode %}
-            <span class="local-access-badge" title="Direct local access">🖥️ Local</span>
+            <span class="local-access-badge" title="Direct local access">Local</span>
           {% endif %}
-          <span class="crumbs">Library &gt; Music &gt; {{ library.id[:8] }}</span>
+          <span class="crumbs">Library &gt; Music &gt; {{ library.display_name }}</span>
         </div>
         <div class="title-actions">
           <div class="title-upload-status" data-upload-status-shell hidden>
@@ -38,7 +38,7 @@
 
       <div class="menu-band">
         <div class="menu-links">
-          <span>Import tracks, search, play, and edit metadata for this shared library.</span>
+          <span>Import tracks, search, play, edit metadata, and manually group albums in this shared library.</span>
         </div>
       </div>
       <div class="workspace">
@@ -67,7 +67,8 @@
                 </button>
                 <div>
                   <p class="view-caption">All music</p>
-                  <h1>{{ library.id }}</h1>
+                  <h1>{{ library.display_name }}</h1>
+                  <p class="view-meta library-id-inline">{{ library.id }}</p>
                 </div>
               </div>
             </div>
@@ -98,43 +99,158 @@
 
           {% if view_mode == 'albums' %}
             <section class="album-browser-shell">
-              {% if album_groups %}
+              <div class="collection-studio">
+                <div class="collection-studio-head">
+                  <div>
+                    <p class="dock-label">Manual collections</p>
+                    <h2>Group albums yourself</h2>
+                  </div>
+                  <p class="collection-selection-summary" data-album-selection-summary>Select albums, then create a collection or add them to an existing one.</p>
+                </div>
+                <div class="collection-studio-actions">
+                  <form action="{{ url_for('create_collection', library_id=library.id) }}" method="post" class="collection-studio-form" data-album-selection-form>
+                    <input type="hidden" name="track_ids" value="" data-selected-track-ids>
+                    <input type="text" name="name" placeholder="Collection name" aria-label="Collection name">
+                    <button type="submit" class="frame-button primary" data-requires-album-selection>Create collection</button>
+                  </form>
+                  <form action="{{ url_for('add_to_collection', library_id=library.id) }}" method="post" class="collection-studio-form" data-album-selection-form>
+                    <input type="hidden" name="track_ids" value="" data-selected-track-ids>
+                    <select name="collection_id" data-collection-picker>
+                      <option value="">Add to collection...</option>
+                      {% for collection in collection_groups %}
+                        <option value="{{ collection.id }}">{{ collection.name }}</option>
+                      {% endfor %}
+                    </select>
+                    <button type="submit" class="frame-button" data-requires-album-selection>Add selected</button>
+                  </form>
+                  <form action="{{ url_for('remove_from_collections', library_id=library.id) }}" method="post" class="collection-studio-form" data-album-selection-form>
+                    <input type="hidden" name="track_ids" value="" data-selected-track-ids>
+                    <button type="submit" class="frame-button" data-requires-album-selection>Ungroup selected</button>
+                  </form>
+                </div>
+              </div>
+
+              {% if album_browser_entries %}
                 <div class="album-browser">
-                  {% for group in album_groups %}
-                    <section
-                      class="album-cover-card"
-                      data-album-container
-                      data-album-card
-                      data-search="{{ group.search_value|lower }}"
-                      data-album-primary-track-id="{{ group.tracks[0].id }}"
-                      data-album-browse-url="{{ url_for('view_library', library_id=library.id, view='tracks', album=group.key) }}"
-                      role="button"
-                      tabindex="0"
-                      aria-label="Open {{ group.name }} by {{ group.artist }}"
-                    >
-                      {% set art_id = '' %}
-                      {% set art_classes = 'album-art album-cover-art' %}
-                      {% set art_cover_url = group.cover_url %}
-                      {% set art_alt_text = group.name ~ ' cover art' %}
-                      {% set art_fallback_text = group.cover_initials %}
-                      {% include '_album_art.html' %}
-                      <div class="album-cover-meta">
-                        <p class="album-title">{{ group.name }}</p>
-                        <p class="album-cover-artist">{{ group.artist }}</p>
-                      </div>
-                      <div class="album-card-track-cache" hidden>
-                        {% for track in group.tracks %}
-                          {{ render_track_row(
-                            track,
-                            library,
-                            track_url,
-                            tabindex='-1',
-                            classes='track-row album-browser-hidden-track',
-                            show_columns=False
-                          ) }}
-                        {% endfor %}
-                      </div>
-                    </section>
+                  {% for entry in album_browser_entries %}
+                    {% if entry.kind == 'collection' %}
+                      {% set collection = entry.collection %}
+                      <section
+                        class="album-cover-card collection-cover-card"
+                        data-album-card
+                        data-collection-card
+                        data-search="{{ collection.search_value|lower }}"
+                        aria-label="Toggle {{ collection.name }}"
+                        aria-expanded="false"
+                        role="button"
+                        tabindex="0"
+                      >
+                        <div class="collection-cover-stack" aria-hidden="true">
+                          {% for album in collection.albums[:3] %}
+                            <div class="collection-cover-layer">
+                              {% set art_id = '' %}
+                              {% set art_classes = 'album-art album-cover-art collection-cover-art' %}
+                              {% set art_cover_url = album.cover_url %}
+                              {% set art_alt_text = album.name ~ ' cover art' %}
+                              {% set art_fallback_text = album.cover_initials %}
+                              {% include '_album_art.html' %}
+                            </div>
+                          {% endfor %}
+                        </div>
+                        <div class="album-cover-meta">
+                          <p class="album-title">{{ collection.name }}</p>
+                          <p class="album-cover-artist">{{ collection.album_count }} albums - {{ collection.track_count }} tracks</p>
+                        </div>
+                        <div class="collection-album-list" data-collection-panel hidden>
+                          {% for album in collection.albums %}
+                            <div
+                              class="collection-album-entry"
+                              data-selectable-album
+                              data-album-key="{{ album.key }}"
+                              data-album-track-ids="{{ album.track_ids|join(',') }}"
+                            >
+                              <a
+                                class="collection-album-link"
+                                data-collection-album-link
+                                data-search="{{ album.search_value|lower }}"
+                                href="{{ url_for('view_library', library_id=library.id, view='tracks', album=album.key) }}"
+                              >
+                                <div class="collection-album-art">
+                                  {% set art_id = '' %}
+                                  {% set art_classes = 'album-art collection-child-art' %}
+                                  {% set art_cover_url = album.cover_url %}
+                                  {% set art_alt_text = album.name ~ ' cover art' %}
+                                  {% set art_fallback_text = album.cover_initials %}
+                                  {% include '_album_art.html' %}
+                                </div>
+                                <div class="collection-album-copy">
+                                  <strong>{{ album.name }}</strong>
+                                  <span>{{ album.artist }}</span>
+                                  <span>{{ album.tracks|length }} track{% if album.tracks|length != 1 %}s{% endif %}</span>
+                                </div>
+                              </a>
+                              <button
+                                type="button"
+                                class="album-select-button collection-select-button"
+                                data-album-select
+                                aria-pressed="false"
+                                aria-label="Select {{ album.name }} for grouping"
+                              >
+                                Select
+                              </button>
+                            </div>
+                          {% endfor %}
+                        </div>
+                      </section>
+                    {% else %}
+                      {% set group = entry.album %}
+                      <section
+                        class="album-cover-card"
+                        data-album-container
+                        data-album-card
+                        data-selectable-album
+                        data-album-key="{{ group.key }}"
+                        data-album-track-ids="{{ group.track_ids|join(',') }}"
+                        data-search="{{ group.search_value|lower }}"
+                        data-album-primary-track-id="{{ group.tracks[0].id }}"
+                        data-album-browse-url="{{ url_for('view_library', library_id=library.id, view='tracks', album=group.key) }}"
+                        role="button"
+                        tabindex="0"
+                        aria-label="Open {{ group.name }} by {{ group.artist }}"
+                      >
+                        <button
+                          type="button"
+                          class="album-select-button"
+                          data-album-select
+                          aria-pressed="false"
+                          aria-label="Select {{ group.name }} for grouping"
+                        >
+                          Select
+                        </button>
+                        {% set art_id = '' %}
+                        {% set art_classes = 'album-art album-cover-art' %}
+                        {% set art_cover_url = group.cover_url %}
+                        {% set art_alt_text = group.name ~ ' cover art' %}
+                        {% set art_fallback_text = group.cover_initials %}
+                        {% include '_album_art.html' %}
+                        <div class="album-cover-meta">
+                          <p class="album-title">{{ group.name }}</p>
+                          <p class="album-cover-artist">{{ group.artist }}</p>
+                        </div>
+                        <div class="album-card-track-cache" hidden>
+                          {% for track in group.tracks %}
+                            {{ render_track_row(
+                              track,
+                              library,
+                              track_url,
+                              tabindex='-1',
+                              classes='track-row album-browser-hidden-track',
+                              show_columns=False
+                            ) }}
+                          {% endfor %}
+                        </div>
+                      </section>
+                    {% endif %}
                   {% endfor %}
                 </div>
               {% else %}

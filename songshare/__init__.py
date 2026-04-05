@@ -18,7 +18,7 @@ from werkzeug.utils import secure_filename
 from .album_lookup import LookupError, MusicMetadataClient
 from .importer import ImportError, ImportOutcome, ImportProgressUpdate, LibraryImportService
 from .quick_tunnel import QuickTunnelManager, QuickTunnelStatus
-from .store import LibraryNotFoundError, Store, TrackNotFoundError, UploadedTrack
+from .store import CollectionNotFoundError, LibraryNotFoundError, Store, TrackNotFoundError, UploadedTrack
 
 
 @dataclass
@@ -291,11 +291,14 @@ def create_app(test_config: dict | None = None) -> Flask:
             libraries.append(
                 {
                     "id": library.id,
+                    "name": library.name,
+                    "display_name": library.display_name,
                     "track_count": len(library.tracks),
                     "updated_at": library.updated_at,
                     "share_url": f"{base_url()}{url_for('view_library', library_id=library.id)}",
                     "browse_url": url_for("view_library", library_id=library.id),
                     "delete_url": url_for("delete_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
+                    "rename_url": url_for("rename_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
                     "files_dir": store.library_files_dir(library.id),
                 }
             )
@@ -366,6 +369,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "cover_initials": cover_initials(album_name),
                     "cover_url": "",
                     "search_value": f"{album_name} {artist_name}",
+                    "track_ids": [],
                     "tracks": [],
                 }
 
@@ -374,6 +378,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
             track_view = build_track_view(library.id, track, album_name=album_name, artist_name=artist_name)
             groups[key]["tracks"].append(track_view)
+            groups[key]["track_ids"].append(track_view["id"])
             groups[key]["search_value"] = (
                 f"{groups[key]['search_value']} {track_view['search_value']}"
             ).strip()
@@ -383,6 +388,59 @@ def create_app(test_config: dict | None = None) -> Flask:
                 track["number"] = index
 
         return list(groups.values())
+
+    def parse_track_ids(raw_value) -> list[str]:
+        if isinstance(raw_value, list):
+            return [str(item).strip() for item in raw_value if str(item).strip()]
+        return [item.strip() for item in str(raw_value or "").split(",") if item.strip()]
+
+    def build_collection_groups(library, album_groups: list[dict]) -> tuple[list[dict], set[str]]:
+        grouped_album_keys: set[str] = set()
+        collections: list[dict] = []
+        for stored_collection in library.collections:
+            selected_track_ids = set(stored_collection.track_ids)
+            albums = [group for group in album_groups if any(track_id in selected_track_ids for track_id in group["track_ids"])]
+            if not albums:
+                continue
+
+            grouped_album_keys.update(album["key"] for album in albums)
+            collections.append(
+                {
+                    "id": stored_collection.id,
+                    "key": f"collection::{stored_collection.id}",
+                    "name": stored_collection.name,
+                    "artist": "",
+                    "album_count": len(albums),
+                    "track_count": sum(len(album["tracks"]) for album in albums),
+                    "cover_url": next((album["cover_url"] for album in albums if album["cover_url"]), ""),
+                    "cover_initials": cover_initials(stored_collection.name),
+                    "search_value": " ".join(
+                        [stored_collection.name, *[album["search_value"] for album in albums]]
+                    ).strip(),
+                    "albums": albums,
+                }
+            )
+
+        return collections, grouped_album_keys
+
+    def build_album_browser_entries(library, album_groups: list[dict]) -> tuple[list[dict], list[dict]]:
+        collections, grouped_album_keys = build_collection_groups(library, album_groups)
+        collection_by_first_key = {
+            collection["albums"][0]["key"]: collection
+            for collection in collections
+            if collection["albums"]
+        }
+        entries: list[dict] = []
+
+        for group in album_groups:
+            if group["key"] in collection_by_first_key:
+                entries.append({"kind": "collection", "collection": collection_by_first_key[group["key"]]})
+                continue
+            if group["key"] in grouped_album_keys:
+                continue
+            entries.append({"kind": "album", "album": group})
+
+        return entries, collections
 
     def cover_initials(album_name: str) -> str:
         words = [word[:1].upper() for word in album_name.split() if word]
@@ -536,7 +594,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.post("/libraries")
     def create_library():
         require_owner_access()
-        library = store.create_library()
+        library = store.create_library(name=request.form.get("name", ""))
         return redirect(
             url_for("view_library", library_id=library.id, notice="Library ready. Drop tracks into the queue.")
         )
@@ -554,6 +612,68 @@ def create_app(test_config: dict | None = None) -> Flask:
             return jsonify({"ok": True, "redirect_url": redirect_url})
         return redirect(redirect_url)
 
+    @app.post("/libraries/<library_id>/rename")
+    def rename_library(library_id: str):
+        require_owner_access()
+        try:
+            library = store.rename_library(library_id, name=request.form.get("name", ""))
+        except LibraryNotFoundError:
+            abort(404)
+
+        if wants_json():
+            return jsonify({"ok": True, "library": {"id": library.id, "name": library.name, "display_name": library.display_name}})
+        return redirect(url_for("owner_home", owner_token=app.config["OWNER_TOKEN"]))
+
+    @app.post("/s/<library_id>/collections")
+    def create_collection(library_id: str):
+        try:
+            collection = store.create_collection(
+                library_id,
+                name=request.form.get("name", ""),
+                track_ids=parse_track_ids(request.form.get("track_ids", "")),
+            )
+        except LibraryNotFoundError:
+            abort(404)
+        except ValueError as exc:
+            return redirect(url_for("view_library", library_id=library_id, view="albums", error=str(exc)))
+
+        if wants_json():
+            return jsonify({"ok": True, "collection": {"id": collection.id, "name": collection.name}})
+        return redirect(url_for("view_library", library_id=library_id, view="albums", notice=f"Collection {collection.name} created."))
+
+    @app.post("/s/<library_id>/collections/add")
+    def add_to_collection(library_id: str):
+        try:
+            collection = store.add_tracks_to_collection(
+                library_id,
+                request.form.get("collection_id", "").strip(),
+                track_ids=parse_track_ids(request.form.get("track_ids", "")),
+            )
+        except (LibraryNotFoundError, CollectionNotFoundError):
+            abort(404)
+        except ValueError as exc:
+            return redirect(url_for("view_library", library_id=library_id, view="albums", error=str(exc)))
+
+        if wants_json():
+            return jsonify({"ok": True, "collection": {"id": collection.id, "name": collection.name}})
+        return redirect(url_for("view_library", library_id=library_id, view="albums", notice=f"Added albums to {collection.name}."))
+
+    @app.post("/s/<library_id>/collections/remove")
+    def remove_from_collections(library_id: str):
+        try:
+            removed = store.remove_tracks_from_collections(
+                library_id,
+                track_ids=parse_track_ids(request.form.get("track_ids", "")),
+            )
+        except LibraryNotFoundError:
+            abort(404)
+
+        if wants_json():
+            return jsonify({"ok": True, "removed": removed})
+        if removed:
+            return redirect(url_for("view_library", library_id=library_id, view="albums", notice="Removed selected albums from collections."))
+        return redirect(url_for("view_library", library_id=library_id, view="albums", error="Choose at least one album to ungroup."))
+
     @app.get("/s/<library_id>")
     def view_library(library_id: str):
         try:
@@ -567,11 +687,14 @@ def create_app(test_config: dict | None = None) -> Flask:
         selected_album_key = request.args.get("album", "").strip().lower()
 
         album_groups = build_album_groups(library)
+        album_browser_entries, collection_groups = build_album_browser_entries(library, album_groups)
 
         return render_template(
             "library.html",
             library=library,
             album_groups=album_groups,
+            album_browser_entries=album_browser_entries,
+            collection_groups=collection_groups,
             album_count=len(album_groups),
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
             library_files_dir=store.library_files_dir(library.id),

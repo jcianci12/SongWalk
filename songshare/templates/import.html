@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Import | {{ library.id }}</title>
+    <title>Import | {{ library.display_name }}</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" data-dynamic-favicon>
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
@@ -16,7 +16,7 @@
           {% if local_access_mode %}
             <span class="local-access-badge" title="Direct local access">Local</span>
           {% endif %}
-          <span class="crumbs">Library &gt; Import &gt; {{ library.id[:8] }}</span>
+          <span class="crumbs">Library &gt; Import &gt; {{ library.display_name }}</span>
         </div>
         <div class="title-actions">
           <a class="frame-button" href="{{ url_for('view_library', library_id=library.id) }}">Back to library</a>
@@ -34,7 +34,8 @@
         <section class="import-hero">
           <div>
             <p class="view-caption">Import studio</p>
-            <h1>{{ library.id }}</h1>
+            <h1>{{ library.display_name }}</h1>
+            <p class="view-meta library-id-inline">{{ library.id }}</p>
             <p class="import-hero-copy">
               Local uploads land immediately. YouTube and Spotify imports download audio, then SongWalk fills missing tags from MusicBrainz when it has enough metadata to match.
             </p>

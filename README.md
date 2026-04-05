@@ -57,6 +57,10 @@ Open `http://localhost:8080`.
 
 For YouTube and Spotify imports in a plain Python install, make sure `ffmpeg` is available on your `PATH`. The Python requirements install `yt-dlp` and `spotdl`; `ffmpeg` still needs to come from your OS package manager or a manual install.
 
+## Desktop Build
+
+For a local desktop executable, use the PyInstaller build path documented in [docs/desktop-packaging.md](docs/desktop-packaging.md).
+
 If you open root directly on `localhost`, SongWalk now shows a local launch page with the owner dashboard link plus Quick Tunnel on/off controls and the current public host when it is online.
 
 For public hosts, tunnels, and reverse proxies, root stays in share-access mode and does not reveal library IDs.

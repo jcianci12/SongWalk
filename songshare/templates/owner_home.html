@@ -18,7 +18,8 @@
           <span class="crumbs">Library &gt; Music &gt; Owner dashboard</span>
         </div>
         <div class="title-actions">
-          <form action="{{ url_for('create_library', owner_token=owner_token) }}" method="post">
+          <form action="{{ url_for('create_library', owner_token=owner_token) }}" method="post" class="owner-create-form">
+            <input type="text" name="name" placeholder="New library name (optional)" aria-label="New library name">
             <button type="submit" class="frame-button primary">Create library</button>
           </form>
         </div>
@@ -69,7 +70,14 @@
                 {% for library in libraries %}
                   <div class="library-row">
                     <div class="library-row-main">
-                      <a class="library-link" href="{{ library.browse_url }}">{{ library.id }}</a>
+                      <div class="library-label-stack">
+                        <a class="library-link" href="{{ library.browse_url }}">{{ library.display_name }}</a>
+                        <code class="library-id-note">{{ library.id }}</code>
+                      </div>
+                      <form action="{{ library.rename_url }}" method="post" class="library-rename-form">
+                        <input type="text" name="name" value="{{ library.name }}" placeholder="Rename library" aria-label="Rename library {{ library.display_name }}">
+                        <button type="submit" class="frame-button">Save</button>
+                      </form>
                     </div>
                     <div>{{ library.track_count }}</div>
                     <div>{{ library.updated_at|friendly_time }}</div>
@@ -82,10 +90,10 @@
                         method="post"
                         class="inline-icon-form"
                         data-delete-library-form
-                        data-library-label="{{ library.id }}"
+                        data-library-label="{{ library.display_name }}"
                         data-redirect-url="{{ url_for('owner_home', owner_token=owner_token) }}"
                       >
-                        <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ library.id }}" title="Delete library">
+                        <button type="submit" class="icon-button danger-icon-button" aria-label="Delete library {{ library.display_name }}" title="Delete library">
                           &#128465;
                         </button>
                       </form>

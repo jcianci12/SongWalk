@@ -6,4 +6,6 @@ venv/
 .tmp-tests/
 *.log
 songshare-data/
+build/pyinstaller/build/
+build/pyinstaller/dist/
 /*-*-*-*-*/

@@ -986,7 +986,13 @@
 
   const rows = Array.from(document.querySelectorAll("[data-track-row]"));
   const albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
-  const albumCards = Array.from(document.querySelectorAll("[data-album-card]"));
+  const albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
+  const collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
+  const selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
+  const albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
+  const albumSelectionForms = Array.from(document.querySelectorAll("[data-album-selection-form]"));
+  const albumSelectionInputs = Array.from(document.querySelectorAll("[data-selected-track-ids]"));
+  const albumSelectionSummary = document.querySelector("[data-album-selection-summary]");
   const player = document.getElementById("deck-player");
   const titleTarget = document.getElementById("now-playing-title");
   const metaTarget = document.getElementById("now-playing-meta");
@@ -1046,6 +1052,7 @@
   let isShuffleEnabled = false;
   let isRepeatEnabled = false;
   let playbackRow = null;
+  const selectedAlbumKeys = new Set();
   const defaultDocumentTitle = document.title;
 
   function visibleRows() {
@@ -1621,6 +1628,103 @@
     return normalizeSearchText(card.getAttribute("data-search") || "");
   }
 
+  function setCollectionOpen(card, open) {
+    if (!card) {
+      return;
+    }
+
+    const panel = card.querySelector("[data-collection-panel]");
+    const isOpen = Boolean(open);
+    card.classList.toggle("is-open", isOpen);
+    card.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    if (panel) {
+      panel.hidden = !isOpen;
+    }
+  }
+
+  function albumTrackIds(node) {
+    return String(node?.getAttribute("data-album-track-ids") || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  function selectedAlbumTrackIds() {
+    const trackIds = [];
+    selectableAlbums.forEach((node) => {
+      const key = node.getAttribute("data-album-key") || "";
+      if (!selectedAlbumKeys.has(key)) {
+        return;
+      }
+
+      albumTrackIds(node).forEach((trackId) => {
+        if (!trackIds.includes(trackId)) {
+          trackIds.push(trackId);
+        }
+      });
+    });
+    return trackIds;
+  }
+
+  function syncAlbumSelectionForms() {
+    const selectedCount = selectedAlbumKeys.size;
+    const trackIds = selectedAlbumTrackIds().join(",");
+
+    selectableAlbums.forEach((node) => {
+      const key = node.getAttribute("data-album-key") || "";
+      const isSelected = selectedAlbumKeys.has(key);
+      node.classList.toggle("is-group-selected", isSelected);
+    });
+
+    albumSelectButtons.forEach((button) => {
+      const node = button.closest("[data-selectable-album]");
+      const key = node ? (node.getAttribute("data-album-key") || "") : "";
+      const isSelected = selectedAlbumKeys.has(key);
+      button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+      button.textContent = isSelected ? "Selected" : "Select";
+    });
+
+    albumSelectionInputs.forEach((input) => {
+      input.value = trackIds;
+    });
+
+    albumSelectionForms.forEach((form) => {
+      const picker = form.querySelector("[data-collection-picker]");
+      const hasCollectionChoice = !picker || Boolean(picker.value);
+      form.querySelectorAll("[data-requires-album-selection]").forEach((button) => {
+        button.disabled = !selectedCount || !hasCollectionChoice;
+      });
+    });
+
+    if (albumSelectionSummary) {
+      if (!selectedCount) {
+        albumSelectionSummary.textContent = "Select albums, then create a collection or add them to an existing one.";
+      } else if (selectedCount === 1) {
+        albumSelectionSummary.textContent = "1 album selected.";
+      } else {
+        albumSelectionSummary.textContent = `${selectedCount} albums selected.`;
+      }
+    }
+  }
+
+  function toggleAlbumSelection(node) {
+    if (!node) {
+      return;
+    }
+
+    const key = node.getAttribute("data-album-key") || "";
+    if (!key) {
+      return;
+    }
+
+    if (selectedAlbumKeys.has(key)) {
+      selectedAlbumKeys.delete(key);
+    } else {
+      selectedAlbumKeys.add(key);
+    }
+    syncAlbumSelectionForms();
+  }
+
   function matchesSearchValue(haystack, query) {
     return !query || haystack.includes(query);
   }
@@ -1647,6 +1751,7 @@
       normalizedQuery: query,
       rowCount: rows.length,
       albumCardCount: albumCards.length,
+      collectionCardCount: collectionCards.length,
     });
 
     rows.forEach((row) => {
@@ -1675,6 +1780,23 @@
       });
     });
 
+    collectionCards.forEach((card) => {
+      const haystack = cardSearchValue(card);
+      const childMatches = Array.from(card.querySelectorAll("[data-collection-album-link]")).some((link) => {
+        return matchesSearchValue(cardSearchValue(link), query);
+      });
+      const match = matchesSearchValue(haystack, query) || childMatches;
+      card.hidden = !match;
+      setCollectionOpen(card, Boolean(query) && match && childMatches);
+      debugLog("filter.collectionCard", {
+        title: card.querySelector(".album-title")?.textContent || "",
+        haystack,
+        childMatches,
+        match,
+        hidden: card.hidden,
+      });
+    });
+
     syncAlbumSectionVisibility();
     syncSelectionToVisibleRows();
 
@@ -1684,6 +1806,8 @@
       hiddenRows: rows.filter((row) => row.hidden).length,
       visibleAlbumCards: albumCards.filter((card) => !card.hidden).length,
       hiddenAlbumCards: albumCards.filter((card) => card.hidden).length,
+      visibleCollectionCards: collectionCards.filter((card) => !card.hidden).length,
+      hiddenCollectionCards: collectionCards.filter((card) => card.hidden).length,
     });
   }
 
@@ -2114,6 +2238,7 @@
     debugLog("rows.init", {
       rowCount: rows.length,
       albumCardCount: albumCards.length,
+      collectionCardCount: collectionCards.length,
       filterPresent: Boolean(filterInput),
       sampleRows: rows.slice(0, 5).map((row) => {
         const track = trackStateFromRow(row);
@@ -2223,6 +2348,35 @@
         if (row) {
           selectRow(row, false);
         }
+      });
+    });
+
+    collectionCards.forEach((card) => {
+      card.addEventListener("click", (event) => {
+        if (event.target && typeof event.target.closest === "function" && event.target.closest("[data-collection-album-link]")) {
+          return;
+        }
+
+        const isOpen = card.getAttribute("aria-expanded") === "true";
+        setCollectionOpen(card, !isOpen);
+      });
+
+      card.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+
+        event.preventDefault();
+        const isOpen = card.getAttribute("aria-expanded") === "true";
+        setCollectionOpen(card, !isOpen);
+      });
+    });
+
+    albumSelectButtons.forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleAlbumSelection(button.closest("[data-selectable-album]"));
       });
     });
 
@@ -2369,6 +2523,16 @@
       filterPresent: Boolean(filterInput),
       rowCount: rows.length,
     });
+  }
+
+  albumSelectionForms.forEach((form) => {
+    const picker = form.querySelector("[data-collection-picker]");
+    if (picker) {
+      picker.addEventListener("change", syncAlbumSelectionForms);
+    }
+  });
+  if (albumSelectionForms.length) {
+    syncAlbumSelectionForms();
   }
 
   if (editForm) {

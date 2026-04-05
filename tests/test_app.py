@@ -363,6 +363,54 @@ class SongshareAppTestCase(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.app.config["STORE"].get_library(library_id)
 
+    def test_rename_library_updates_display_name_but_keeps_uuid(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        rename_response = self.client.post(
+            f"/libraries/{library_id}/rename?owner_token={self.owner_token}",
+            data={"name": "Road Trip"},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(rename_response.status_code, 200)
+        payload = rename_response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["library"]["name"], "Road Trip")
+        self.assertEqual(payload["library"]["display_name"], "Road Trip")
+
+        renamed_library = self.app.config["STORE"].get_library(library_id)
+        self.assertEqual(renamed_library.name, "Road Trip")
+        self.assertEqual(renamed_library.display_name, "Road Trip")
+
+        owner_page = self.client.get(f"/owner/{self.owner_token}")
+        self.assertEqual(owner_page.status_code, 200)
+        self.assertIn(b"Road Trip", owner_page.data)
+        self.assertIn(library_id.encode(), owner_page.data)
+
+        library_page = self.client.get(library_path)
+        self.assertEqual(library_page.status_code, 200)
+        self.assertIn(b"Road Trip", library_page.data)
+        self.assertIn(library_id.encode(), library_page.data)
+
+        import_page = self.client.get(f"{library_path}/import")
+        self.assertEqual(import_page.status_code, 200)
+        self.assertIn(b"Road Trip", import_page.data)
+        self.assertIn(library_id.encode(), import_page.data)
+
+    def test_create_library_accepts_optional_name(self) -> None:
+        response = self.client.post(
+            f"/libraries?owner_token={self.owner_token}",
+            data={"name": "Gym Mix"},
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 302)
+        library_id = response.headers["Location"].split("?", 1)[0].rsplit("/", 1)[-1]
+
+        library = self.app.config["STORE"].get_library(library_id)
+        self.assertEqual(library.name, "Gym Mix")
+        self.assertEqual(library.display_name, "Gym Mix")
+
     def test_album_view_renders(self) -> None:
         response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
@@ -380,6 +428,90 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"album-browser", page.data)
         self.assertIn(b"data-album-browse-url", page.data)
         self.assertIn(b"data-search=", page.data)
+
+    def test_album_view_requires_manual_collection_creation(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-track-1"), "one.mp3"),
+                    (io.BytesIO(b"ID3-track-2"), "two.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        album_names = ["First EP", "Second EP"]
+        for track, album_name in zip(library.tracks, album_names):
+            self.app.config["STORE"].update_track(
+                library_id,
+                track.id,
+                title=f"{album_name} Song",
+                artist="Demo Artist",
+                album=album_name,
+            )
+
+        page = self.client.get(f"{library_path}?view=albums")
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.data.count(b"data-collection-card"), 0)
+        self.assertIn(b"First EP", page.data)
+        self.assertIn(b"Second EP", page.data)
+        self.assertIn(b"Create collection", page.data)
+        self.assertIn(b"Add selected", page.data)
+        self.assertIn(b"Ungroup selected", page.data)
+
+    def test_album_view_renders_manual_collection_after_create(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-track-1"), "one.mp3"),
+                    (io.BytesIO(b"ID3-track-2"), "two.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        album_names = ["First EP", "Second EP"]
+        for track, album_name in zip(library.tracks, album_names):
+            self.app.config["STORE"].update_track(
+                library_id,
+                track.id,
+                title=f"{album_name} Song",
+                artist="Demo Artist",
+                album=album_name,
+            )
+
+        selected_track_ids = ",".join(track.id for track in library.tracks)
+        create_response = self.client.post(
+            f"/s/{library_id}/collections",
+            data={"name": "Demo Singles", "track_ids": selected_track_ids},
+            follow_redirects=False,
+        )
+        self.assertEqual(create_response.status_code, 302)
+
+        page = self.client.get(f"{library_path}?view=albums")
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.data.count(b"data-collection-card"), 1)
+        self.assertIn(b"Demo Singles", page.data)
+        self.assertIn(b"First EP", page.data)
+        self.assertIn(b"Second EP", page.data)
+        self.assertIn(
+            f'/s/{library_id}?view=tracks&amp;album=first+ep::demo+artist'.encode(),
+            page.data,
+        )
 
     def test_library_page_renders_drawer_import_controls(self) -> None:
         response = self.create_library()
@@ -420,6 +552,16 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(page.data.count(b">Download<"), 1)
         self.assertIn(b"Search tracks and albums", page.data)
         self.assertIn(b"data-upload-status-shell", page.data)
+
+    def test_owner_dashboard_renders_rename_controls(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        page = self.client.get(f"/owner/{self.owner_token}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(f'action="/libraries/{library_id}/rename?owner_token={self.owner_token}"'.encode(), page.data)
+        self.assertIn(b"Rename library", page.data)
 
     def test_download_library_returns_zip_archive(self) -> None:
         response = self.create_library()

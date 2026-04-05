@@ -38,6 +38,10 @@ class TrackNotFoundError(FileNotFoundError):
     pass
 
 
+class CollectionNotFoundError(FileNotFoundError):
+    pass
+
+
 @dataclass
 class UploadedTrack:
     filename: str
@@ -90,10 +94,40 @@ class Track:
 
 
 @dataclass
+class Collection:
+    id: str
+    name: str
+    track_ids: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_dict(cls, payload: dict) -> "Collection":
+        return cls(
+            id=payload["id"],
+            name=payload.get("name", ""),
+            track_ids=[str(track_id) for track_id in payload.get("track_ids", [])],
+            created_at=datetime.fromisoformat(payload["created_at"]),
+            updated_at=datetime.fromisoformat(payload["updated_at"]),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "track_ids": self.track_ids,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+        }
+
+
+@dataclass
 class Library:
     id: str
     created_at: datetime
     updated_at: datetime
+    name: str = ""
+    collections: list[Collection] = field(default_factory=list)
     tracks: list[Track] = field(default_factory=list)
 
     @classmethod
@@ -102,6 +136,8 @@ class Library:
             id=payload["id"],
             created_at=datetime.fromisoformat(payload["created_at"]),
             updated_at=datetime.fromisoformat(payload["updated_at"]),
+            name=payload.get("name", ""),
+            collections=[Collection.from_dict(item) for item in payload.get("collections", [])],
             tracks=[Track.from_dict(item) for item in payload.get("tracks", [])],
         )
 
@@ -110,8 +146,15 @@ class Library:
             "id": self.id,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "name": self.name,
+            "collections": [collection.to_dict() for collection in self.collections],
             "tracks": [track.to_dict() for track in self.tracks],
         }
+
+    @property
+    def display_name(self) -> str:
+        name = self.name.strip()
+        return name or self.id
 
 
 class Store:
@@ -133,7 +176,7 @@ class Store:
         libraries.sort(key=lambda item: item.updated_at, reverse=True)
         return libraries
 
-    def create_library(self) -> Library:
+    def create_library(self, *, name: str = "") -> Library:
         with self._lock:
             for _ in range(5):
                 library_id = str(uuid.uuid4())
@@ -144,10 +187,72 @@ class Store:
                 files_dir = library_dir / "files"
                 files_dir.mkdir(parents=True, exist_ok=False)
                 now = _now()
-                library = Library(id=library_id, created_at=now, updated_at=now)
+                library = Library(id=library_id, created_at=now, updated_at=now, name=name.strip())
                 self._write_library(library)
                 return library
         raise RuntimeError("unable to allocate library id")
+
+    def rename_library(self, library_id: str, *, name: str) -> Library:
+        with self._lock:
+            library = self.get_library(library_id)
+            library.name = name.strip()
+            library.updated_at = _now()
+            self._write_library(library)
+            return library
+
+    def create_collection(self, library_id: str, *, name: str, track_ids: list[str]) -> Collection:
+        with self._lock:
+            library = self.get_library(library_id)
+            normalized_name = name.strip()
+            if not normalized_name:
+                raise ValueError("Collection name is required.")
+
+            selected_track_ids = self._normalize_track_ids(library, track_ids)
+            if not selected_track_ids:
+                raise ValueError("Choose at least one album to group.")
+
+            now = _now()
+            self._remove_track_ids_from_collections_locked(library, selected_track_ids)
+            collection = Collection(
+                id=str(uuid.uuid4()),
+                name=normalized_name,
+                track_ids=selected_track_ids,
+                created_at=now,
+                updated_at=now,
+            )
+            library.collections.append(collection)
+            library.updated_at = now
+            self._write_library(library)
+            return collection
+
+    def add_tracks_to_collection(self, library_id: str, collection_id: str, *, track_ids: list[str]) -> Collection:
+        with self._lock:
+            library = self.get_library(library_id)
+            collection = self._find_collection(library, collection_id)
+            selected_track_ids = self._normalize_track_ids(library, track_ids)
+            if not selected_track_ids:
+                raise ValueError("Choose at least one album to group.")
+
+            self._remove_track_ids_from_collections_locked(library, selected_track_ids, except_collection_id=collection_id)
+            collection.track_ids = _unique_strings([*collection.track_ids, *selected_track_ids])
+            collection.updated_at = _now()
+            library.updated_at = collection.updated_at
+            self._prune_empty_collections_locked(library)
+            self._write_library(library)
+            return collection
+
+    def remove_tracks_from_collections(self, library_id: str, *, track_ids: list[str]) -> int:
+        with self._lock:
+            library = self.get_library(library_id)
+            selected_track_ids = self._normalize_track_ids(library, track_ids)
+            if not selected_track_ids:
+                return 0
+
+            removed = self._remove_track_ids_from_collections_locked(library, selected_track_ids)
+            if removed:
+                library.updated_at = _now()
+                self._write_library(library)
+            return removed
 
     def delete_library(self, library_id: str) -> None:
         with self._lock:
@@ -367,6 +472,45 @@ class Store:
         payload = json.dumps(library.to_dict(), indent=2)
         target_path.write_text(payload, encoding="utf-8")
 
+    @staticmethod
+    def _find_collection(library: Library, collection_id: str) -> Collection:
+        for collection in library.collections:
+            if collection.id == collection_id:
+                return collection
+        raise CollectionNotFoundError(collection_id)
+
+    @staticmethod
+    def _normalize_track_ids(library: Library, track_ids: list[str]) -> list[str]:
+        valid_track_ids = {track.id for track in library.tracks}
+        return [track_id for track_id in _unique_strings(track_ids) if track_id in valid_track_ids]
+
+    @staticmethod
+    def _prune_empty_collections_locked(library: Library) -> None:
+        library.collections = [collection for collection in library.collections if collection.track_ids]
+
+    def _remove_track_ids_from_collections_locked(
+        self,
+        library: Library,
+        track_ids: list[str],
+        *,
+        except_collection_id: str = "",
+    ) -> int:
+        target_ids = set(track_ids)
+        removed = 0
+
+        for collection in library.collections:
+            if except_collection_id and collection.id == except_collection_id:
+                continue
+
+            next_track_ids = [track_id for track_id in collection.track_ids if track_id not in target_ids]
+            removed += len(collection.track_ids) - len(next_track_ids)
+            if next_track_ids != collection.track_ids:
+                collection.track_ids = next_track_ids
+                collection.updated_at = _now()
+
+        self._prune_empty_collections_locked(library)
+        return removed
+
     def _write_cover_art(
         self,
         library_id: str,
@@ -393,6 +537,18 @@ class Store:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        unique.append(text)
+    return unique
 
 
 def _unlink_with_retries(path: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:

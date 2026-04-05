@@ -33,6 +33,26 @@ def new_test_dir() -> Path:
 
 
 class StoreTestCase(unittest.TestCase):
+    def test_library_name_lifecycle(self) -> None:
+        temp_dir = new_test_dir()
+        store = Store(temp_dir)
+        library = store.create_library(name="Road Trip")
+
+        self.assertEqual(library.name, "Road Trip")
+        self.assertEqual(library.display_name, "Road Trip")
+
+        renamed = store.rename_library(library.id, name="Late Night")
+        self.assertEqual(renamed.name, "Late Night")
+        self.assertEqual(renamed.display_name, "Late Night")
+
+        loaded = store.get_library(library.id)
+        self.assertEqual(loaded.name, "Late Night")
+        self.assertEqual(loaded.display_name, "Late Night")
+
+        cleared = store.rename_library(library.id, name="  ")
+        self.assertEqual(cleared.name, "")
+        self.assertEqual(cleared.display_name, library.id)
+
     def test_track_lifecycle(self) -> None:
         temp_dir = new_test_dir()
         store = Store(temp_dir)
@@ -72,6 +92,37 @@ class StoreTestCase(unittest.TestCase):
         after_delete = store.get_library(library.id)
         self.assertEqual(len(after_delete.tracks), 0)
         self.assertFalse(file_path.exists())
+
+    def test_collection_lifecycle(self) -> None:
+        temp_dir = new_test_dir()
+        store = Store(temp_dir)
+        library = store.create_library()
+
+        first = store.add_track(
+            library.id,
+            UploadedTrack(filename="one.mp3", content_type="audio/mpeg", stream=io.BytesIO(b"ID3-one")),
+        )
+        second = store.add_track(
+            library.id,
+            UploadedTrack(filename="two.mp3", content_type="audio/mpeg", stream=io.BytesIO(b"ID3-two")),
+        )
+
+        collection = store.create_collection(library.id, name="Singles", track_ids=[first.id])
+        self.assertEqual(collection.name, "Singles")
+        self.assertEqual(collection.track_ids, [first.id])
+
+        updated = store.add_tracks_to_collection(library.id, collection.id, track_ids=[second.id])
+        self.assertEqual(updated.track_ids, [first.id, second.id])
+
+        removed = store.remove_tracks_from_collections(library.id, track_ids=[first.id])
+        self.assertEqual(removed, 1)
+        loaded = store.get_library(library.id)
+        self.assertEqual(loaded.collections[0].track_ids, [second.id])
+
+        removed = store.remove_tracks_from_collections(library.id, track_ids=[second.id])
+        self.assertEqual(removed, 1)
+        loaded = store.get_library(library.id)
+        self.assertEqual(loaded.collections, [])
 
 
 if __name__ == "__main__":

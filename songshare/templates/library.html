@@ -30,6 +30,7 @@
             </div>
           </div>
           <a class="frame-button" href="{{ url_for('view_import', library_id=library.id) }}">Import</a>
+          <a class="frame-button" href="{{ url_for('download_library', library_id=library.id) }}">Download</a>
           <a class="frame-button" href="{{ url_for('home') }}">Share access</a>
           <button type="button" class="frame-button" data-copy="{{ share_url }}">Copy share link</button>
         </div>

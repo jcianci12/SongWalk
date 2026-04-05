@@ -1,6 +1,6 @@
 (function () {
   // Increment this whenever we need to confirm a fresh JS build is running in the browser.
-  const SCRIPT_VERSION = "2026-04-03-import-progress-1";
+  const SCRIPT_VERSION = "2026-04-05-ios-track-skip-1";
   const DEBUG_FILTERING = true;
 
   function debugLog(scope, ...details) {
@@ -1030,12 +1030,22 @@
   const bulkDeleteUrl = deleteButton ? (deleteButton.getAttribute("data-bulk-delete-url") || "") : "";
   const targetAlbumSection = document.querySelector("[data-target-album-section]");
   const mediaSession = typeof navigator !== "undefined" ? navigator.mediaSession : null;
+  const isAppleMobileMediaSession = (() => {
+    if (typeof navigator === "undefined") {
+      return false;
+    }
+
+    const platform = String(navigator.platform || "");
+    const userAgent = String(navigator.userAgent || "");
+    return /iPad|iPhone|iPod/i.test(userAgent) || (platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  })();
 
   let selectedRow = null;
   let selectedRows = [];
   let longPressTimer = null;
   let isShuffleEnabled = false;
   let isRepeatEnabled = false;
+  let playbackRow = null;
   const defaultDocumentTitle = document.title;
 
   function visibleRows() {
@@ -1060,13 +1070,35 @@
     return track ? track.resolvedSourceUrl : "";
   }
 
+  function setPlaybackRow(row) {
+    playbackRow = row && rows.includes(row) ? row : null;
+  }
+
   function currentPlaybackRow() {
-    const currentSrc = player ? resolveMediaUrl(player.currentSrc || player.getAttribute("src")) : "";
-    if (!currentSrc) {
-      return selectedRows.length === 1 ? selectedRow : null;
+    if (playbackRow && rows.includes(playbackRow)) {
+      return playbackRow;
     }
 
-    return rows.find((row) => rowSourceUrl(row) === currentSrc) || (selectedRows.length === 1 ? selectedRow : null);
+    const currentSrc = player ? resolveMediaUrl(player.currentSrc || player.getAttribute("src")) : "";
+    if (!currentSrc) {
+      const fallbackRow = selectedRows.length === 1 ? selectedRow : null;
+      if (fallbackRow && rows.includes(fallbackRow)) {
+        playbackRow = fallbackRow;
+      }
+      return fallbackRow;
+    }
+
+    const matchedRow = rows.find((row) => rowSourceUrl(row) === currentSrc);
+    if (matchedRow) {
+      playbackRow = matchedRow;
+      return matchedRow;
+    }
+
+    const fallbackRow = selectedRows.length === 1 ? selectedRow : null;
+    if (fallbackRow && rows.includes(fallbackRow)) {
+      playbackRow = fallbackRow;
+    }
+    return fallbackRow;
   }
 
   function trackStateFromRow(row) {
@@ -1280,6 +1312,68 @@
     } catch (_) {
       // Ignore unsupported action handlers.
     }
+  }
+
+  function bindMediaSessionTransportActions() {
+    if (!player) {
+      return;
+    }
+
+    setMediaSessionAction("play", async () => {
+      if (!player.getAttribute("src")) {
+        selectRow(currentPlaybackRow() || visibleRows()[0] || rows[0], false);
+      }
+
+      await player.play().catch(() => {});
+    });
+    setMediaSessionAction("pause", () => {
+      player.pause();
+    });
+    setMediaSessionAction("previoustrack", () => {
+      const target = previousPlaybackRow();
+      if (target) {
+        selectRow(target, true);
+      }
+    });
+    setMediaSessionAction("nexttrack", () => {
+      const target = nextPlaybackRow();
+      if (target) {
+        selectRow(target, true);
+      }
+    });
+
+    // iOS Control Center prefers seek buttons when both seek and track-skip
+    // handlers are registered, so keep track navigation explicit there.
+    if (isAppleMobileMediaSession) {
+      setMediaSessionAction("seekbackward", null);
+      setMediaSessionAction("seekforward", null);
+    } else {
+      setMediaSessionAction("seekbackward", (details) => {
+        const offset = Number.isFinite(details && details.seekOffset) ? details.seekOffset : 10;
+        player.currentTime = Math.max(player.currentTime - offset, 0);
+        updateMediaSessionPositionState();
+      });
+      setMediaSessionAction("seekforward", (details) => {
+        const offset = Number.isFinite(details && details.seekOffset) ? details.seekOffset : 10;
+        const duration = Number.isFinite(player.duration) ? player.duration : player.currentTime + offset;
+        player.currentTime = Math.min(player.currentTime + offset, duration);
+        updateMediaSessionPositionState();
+      });
+    }
+
+    setMediaSessionAction("seekto", (details) => {
+      if (!details || !Number.isFinite(details.seekTime)) {
+        return;
+      }
+
+      if (details.fastSeek && typeof player.fastSeek === "function") {
+        player.fastSeek(details.seekTime);
+      } else {
+        player.currentTime = details.seekTime;
+      }
+
+      updateMediaSessionPositionState();
+    });
   }
 
   function syncSelectionToVisibleRows() {
@@ -1741,6 +1835,7 @@
 
     if (player) {
       const src = track ? track.sourceUrl : "";
+      setPlaybackRow(track ? row : null);
       if (src && player.getAttribute("src") !== src) {
         player.src = src;
       }
@@ -2349,53 +2444,7 @@
 
   if (player && playButton) {
     player.playsInline = true;
-
-    setMediaSessionAction("play", async () => {
-      if (!player.getAttribute("src")) {
-        selectRow(currentPlaybackRow() || visibleRows()[0] || rows[0], false);
-      }
-
-      await player.play().catch(() => {});
-    });
-    setMediaSessionAction("pause", () => {
-      player.pause();
-    });
-    setMediaSessionAction("previoustrack", () => {
-      const target = previousPlaybackRow();
-      if (target) {
-        selectRow(target, true);
-      }
-    });
-    setMediaSessionAction("nexttrack", () => {
-      const target = nextPlaybackRow();
-      if (target) {
-        selectRow(target, true);
-      }
-    });
-    setMediaSessionAction("seekbackward", (details) => {
-      const offset = Number.isFinite(details && details.seekOffset) ? details.seekOffset : 10;
-      player.currentTime = Math.max(player.currentTime - offset, 0);
-      updateMediaSessionPositionState();
-    });
-    setMediaSessionAction("seekforward", (details) => {
-      const offset = Number.isFinite(details && details.seekOffset) ? details.seekOffset : 10;
-      const duration = Number.isFinite(player.duration) ? player.duration : player.currentTime + offset;
-      player.currentTime = Math.min(player.currentTime + offset, duration);
-      updateMediaSessionPositionState();
-    });
-    setMediaSessionAction("seekto", (details) => {
-      if (!details || !Number.isFinite(details.seekTime)) {
-        return;
-      }
-
-      if (details.fastSeek && typeof player.fastSeek === "function") {
-        player.fastSeek(details.seekTime);
-      } else {
-        player.currentTime = details.seekTime;
-      }
-
-      updateMediaSessionPositionState();
-    });
+    bindMediaSessionTransportActions();
 
     if (progressInput) {
       progressInput.addEventListener("input", () => {
@@ -2496,6 +2545,9 @@
     });
     player.addEventListener("ratechange", updateMediaSessionPositionState);
     player.addEventListener("emptied", () => {
+      if (!player.getAttribute("src")) {
+        setPlaybackRow(null);
+      }
       syncTransportProgress();
       syncDocumentTitle();
       syncMediaSession();

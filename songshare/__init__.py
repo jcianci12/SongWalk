@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import secrets
 import threading
+import tempfile
 import time
+import zipfile
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +13,7 @@ from uuid import uuid4
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 
 from .album_lookup import LookupError, MusicMetadataClient
 from .importer import ImportError, ImportOutcome, ImportProgressUpdate, LibraryImportService
@@ -323,6 +326,30 @@ def create_app(test_config: dict | None = None) -> Flask:
             "search_value": f"{title} {artist_name} {album_name} {track.original_name}".strip(),
         }
 
+    def archive_component(value: str, fallback: str) -> str:
+        normalized = " ".join((value or "").split()).strip(" .")
+        if not normalized:
+            normalized = fallback
+
+        safe_value = secure_filename(normalized).strip("._ ")
+        return safe_value or fallback
+
+    def archive_track_path(track, used_paths: set[str]) -> str:
+        extension = Path(track.original_name or track.stored_name).suffix or Path(track.stored_name).suffix or ".bin"
+        artist = archive_component(track.artist, "Unknown artist")
+        album = archive_component(track.album, "Unknown album")
+        title = archive_component(track.title or Path(track.original_name).stem, track.id)
+        candidate = f"{artist}/{album}/{title}{extension}"
+        counter = 2
+
+        # Keep duplicate song names from overwriting each other inside the zip.
+        while candidate.casefold() in used_paths:
+            candidate = f"{artist}/{album}/{title} ({counter}){extension}"
+            counter += 1
+
+        used_paths.add(candidate.casefold())
+        return candidate
+
     def build_album_groups(library):
         groups: OrderedDict[tuple[str, str], dict] = OrderedDict()
 
@@ -570,6 +597,37 @@ def create_app(test_config: dict | None = None) -> Flask:
             notice=request.args.get("notice", ""),
             error=request.args.get("error", ""),
         )
+
+    @app.get("/s/<library_id>/download")
+    def download_library(library_id: str):
+        try:
+            library = store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        archive_file = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
+        used_paths: set[str] = set()
+
+        with zipfile.ZipFile(archive_file, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            if not library.tracks:
+                archive.writestr("README.txt", "SongWalk library is empty.\n")
+
+            for track in library.tracks:
+                file_path = store.library_files_dir(library_id) / track.stored_name
+                if not file_path.exists():
+                    continue
+                archive.write(file_path, arcname=archive_track_path(track, used_paths))
+
+        archive_file.seek(0)
+        response = send_file(
+            archive_file,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"songwalk-library-{library.id}.zip",
+            max_age=0 if app.config["DEV_MODE"] else None,
+        )
+        response.call_on_close(archive_file.close)
+        return response
 
     @app.get("/s/<library_id>/import/youtube/search")
     def search_youtube_import(library_id: str):

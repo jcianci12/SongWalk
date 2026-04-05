@@ -4,6 +4,7 @@ import io
 import time
 import unittest
 import uuid
+import zipfile
 from pathlib import Path
 
 from songshare.album_lookup import LookupCandidate
@@ -387,6 +388,7 @@ class SongshareAppTestCase(unittest.TestCase):
         page = self.client.get(library_path)
         self.assertEqual(page.status_code, 200)
         self.assertIn(f'href="{library_path}/import"'.encode(), page.data)
+        self.assertIn(f'href="{library_path}/download"'.encode(), page.data)
         self.assertIn(b"toggle-library-drawer", page.data)
 
     def test_track_view_marks_target_album_section(self) -> None:
@@ -413,10 +415,70 @@ class SongshareAppTestCase(unittest.TestCase):
         page = self.client.get(library_path)
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"drawer-handle-button", page.data)
-        self.assertEqual(page.data.count(b'href="/s/'), 3)
+        self.assertIn(f'href="{library_path}/download"'.encode(), page.data)
         self.assertEqual(page.data.count(b">Import<"), 1)
+        self.assertEqual(page.data.count(b">Download<"), 1)
         self.assertIn(b"Search tracks and albums", page.data)
         self.assertIn(b"data-upload-status-shell", page.data)
+
+    def test_download_library_returns_zip_archive(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-first-track"), "first.mp3"),
+                    (io.BytesIO(b"ID3-second-track"), "second.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        self.app.config["STORE"].update_track(
+            library_id,
+            library.tracks[0].id,
+            title="Same Song",
+            artist="Demo Artist",
+            album="Demo Album",
+        )
+        self.app.config["STORE"].update_track(
+            library_id,
+            library.tracks[1].id,
+            title="Same Song",
+            artist="Demo Artist",
+            album="Demo Album",
+        )
+
+        download_response = self.client.get(f"{library_path}/download")
+        self.assertEqual(download_response.status_code, 200)
+        self.assertEqual(download_response.mimetype, "application/zip")
+        self.assertIn(f"songwalk-library-{library_id}.zip", download_response.headers["Content-Disposition"])
+
+        archive = zipfile.ZipFile(io.BytesIO(download_response.data))
+        self.assertEqual(
+            sorted(archive.namelist()),
+            [
+                "Demo_Artist/Demo_Album/Same_Song (2).mp3",
+                "Demo_Artist/Demo_Album/Same_Song.mp3",
+            ],
+        )
+        expected_bytes = sorted(
+            (
+                self.app.config["STORE"].library_files_dir(library_id) / track.stored_name
+            ).read_bytes()
+            for track in self.app.config["STORE"].get_library(library_id).tracks
+        )
+        self.assertEqual(
+            sorted(archive.read(name) for name in archive.namelist()),
+            expected_bytes,
+        )
+        archive.close()
+        download_response.close()
 
     def test_import_page_renders_all_sources(self) -> None:
         response = self.create_library()

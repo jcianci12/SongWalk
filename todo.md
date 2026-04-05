@@ -1,9 +1,5 @@
-make a /import path that the import button takes the user to. its purpose
-allows drag and drop music
-allows smart youtube ingestion (leverage https://github.com/ytdl-org/youtube-dl)
-allows smart  spotify ingestion (check if we can leverage any open source here)
-all three sources supported.
-
-after ingestion, 
-songs are tagged (reach out to existing music brainz service if tags are not complete)
-songs show in library
+work out how to get the next/prev track working on ios from the control/notification centre.
+downlaod current library.
+rename librabry. (maintain the uuid underneath)
+collections (way to handle when there alot of one or two song albums that we want to show as a collection.) album then shows as overlapping like an accordion.
+runnable exe to allow simple running on windows or mac

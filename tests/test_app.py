@@ -540,6 +540,51 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"data-target-album-section", page.data)
         self.assertIn(b"is-target-album", page.data)
 
+    def test_track_view_renders_manual_collection_controls(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-track-1"), "one.mp3"),
+                    (io.BytesIO(b"ID3-track-2"), "two.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        album_names = ["First EP", "Second EP"]
+        for track, album_name in zip(library.tracks, album_names):
+            self.app.config["STORE"].update_track(
+                library_id,
+                track.id,
+                title=f"{album_name} Song",
+                artist="Demo Artist",
+                album=album_name,
+            )
+
+        self.client.post(
+            f"/s/{library_id}/collections",
+            data={"name": "Demo Singles", "track_ids": ",".join(track.id for track in library.tracks)},
+            follow_redirects=False,
+        )
+
+        page = self.client.get(f"{library_path}?view=tracks")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Group from track selection", page.data)
+        self.assertIn(b'data-collection-selection-scope="tracks"', page.data)
+        self.assertIn(b"Track selection is collapsed to full albums before grouping", page.data)
+        self.assertIn(b"Demo Singles", page.data)
+        self.assertIn(b"data-collection-summary-list", page.data)
+        self.assertIn(b"data-collection-membership", page.data)
+        self.assertIn(b"data-track-album-key", page.data)
+        self.assertIn(b"data-track-album-track-ids", page.data)
+
     def test_library_view_renders_drawer_import_controls(self) -> None:
         response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]

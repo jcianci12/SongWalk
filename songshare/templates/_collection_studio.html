@@ -1,0 +1,72 @@
+<div class="collection-studio">
+  <div class="collection-studio-head">
+    <div>
+      <p class="dock-label">Manual collections</p>
+      <h2>{{ collection_heading }}</h2>
+    </div>
+    <p
+      class="collection-selection-summary"
+      data-collection-selection-summary
+      data-collection-selection-scope="{{ collection_scope }}"
+      data-empty-summary="{{ collection_empty_summary }}"
+      data-selection-singular="{{ collection_item_singular }}"
+      data-selection-plural="{{ collection_item_plural }}"
+    >{{ collection_empty_summary }}</p>
+  </div>
+  {% if collection_note %}
+    <p class="collection-studio-note">{{ collection_note }}</p>
+  {% endif %}
+  <div class="collection-studio-actions">
+    <form
+      action="{{ url_for('create_collection', library_id=library.id) }}"
+      method="post"
+      class="collection-studio-form"
+      data-collection-selection-form
+      data-collection-selection-scope="{{ collection_scope }}"
+    >
+      <input type="hidden" name="track_ids" value="" data-selected-track-ids>
+      <input type="text" name="name" placeholder="Collection name" aria-label="Collection name">
+      <button type="submit" class="frame-button primary" data-requires-collection-selection>Create collection</button>
+    </form>
+    <form
+      action="{{ url_for('add_to_collection', library_id=library.id) }}"
+      method="post"
+      class="collection-studio-form"
+      data-collection-selection-form
+      data-collection-selection-scope="{{ collection_scope }}"
+    >
+      <input type="hidden" name="track_ids" value="" data-selected-track-ids>
+      <select name="collection_id" data-collection-picker>
+        <option value="">Add to collection...</option>
+        {% for collection in collection_groups %}
+          <option value="{{ collection.id }}">{{ collection.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="frame-button" data-requires-collection-selection>Add selected</button>
+    </form>
+    <form
+      action="{{ url_for('remove_from_collections', library_id=library.id) }}"
+      method="post"
+      class="collection-studio-form"
+      data-collection-selection-form
+      data-collection-selection-scope="{{ collection_scope }}"
+    >
+      <input type="hidden" name="track_ids" value="" data-selected-track-ids>
+      <button type="submit" class="frame-button" data-requires-collection-selection>Ungroup selected</button>
+    </form>
+  </div>
+  {% if collection_groups %}
+    <div class="collection-studio-list" data-collection-summary-list>
+      {% for collection in collection_groups %}
+        <a
+          class="collection-studio-chip"
+          href="{{ url_for('view_library', library_id=library.id, view='albums') }}"
+          title="{{ collection.album_count }} albums, {{ collection.track_count }} tracks"
+        >
+          <strong>{{ collection.name }}</strong>
+          <span>{{ collection.album_count }} albums</span>
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>

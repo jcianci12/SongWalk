@@ -320,6 +320,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             "title": title,
             "artist": artist_name,
             "album": album_name,
+            "album_key": album_group_key(album_name, artist_name),
+            "album_track_ids": [],
             "rating": track.rating,
             "original_name": track.original_name,
             "size": track.size,
@@ -386,6 +388,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         for group in groups.values():
             for index, track in enumerate(group["tracks"], start=1):
                 track["number"] = index
+                track["album_key"] = group["key"]
+                track["album_track_ids"] = list(group["track_ids"])
 
         return list(groups.values())
 
@@ -441,6 +445,13 @@ def create_app(test_config: dict | None = None) -> Flask:
             entries.append({"kind": "album", "album": group})
 
         return entries, collections
+
+    def build_collection_album_lookup(collections: list[dict]) -> dict[str, dict]:
+        return {
+            album["key"]: collection
+            for collection in collections
+            for album in collection["albums"]
+        }
 
     def cover_initials(album_name: str) -> str:
         words = [word[:1].upper() for word in album_name.split() if word]
@@ -688,6 +699,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         album_groups = build_album_groups(library)
         album_browser_entries, collection_groups = build_album_browser_entries(library, album_groups)
+        collection_album_lookup = build_collection_album_lookup(collection_groups)
 
         return render_template(
             "library.html",
@@ -695,6 +707,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             album_groups=album_groups,
             album_browser_entries=album_browser_entries,
             collection_groups=collection_groups,
+            collection_album_lookup=collection_album_lookup,
             album_count=len(album_groups),
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
             library_files_dir=store.library_files_dir(library.id),

@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 
 ROOT = Path(SPECPATH).resolve().parents[1]
 PACKAGE_DIR = ROOT / "songshare"
@@ -28,7 +30,7 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=collect_submodules("pystray"),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -47,7 +49,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,
+    console=False,
 )
 
 coll = COLLECT(

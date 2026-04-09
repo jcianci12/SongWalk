@@ -14,6 +14,32 @@ $BuildRoot = if ($OutputRoot) {
 }
 $DistPath = Join-Path $BuildRoot "dist\windows"
 $WorkPath = Join-Path $BuildRoot "build\windows"
+$CloudflaredUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+$ExeFolder = Join-Path $DistPath "SongWalk"
+
+function Remove-PathWithRetries {
+  param(
+    [string]$TargetPath,
+    [int]$Attempts = 10,
+    [int]$DelayMilliseconds = 250
+  )
+
+  if (-not (Test-Path $TargetPath)) {
+    return
+  }
+
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      Remove-Item -LiteralPath $TargetPath -Recurse -Force
+      return
+    } catch {
+      if ($attempt -eq $Attempts) {
+        throw "Unable to remove $TargetPath. Close any running SongWalk or cloudflared process using that folder and try again."
+      }
+      Start-Sleep -Milliseconds $DelayMilliseconds
+    }
+  }
+}
 
 function Invoke-Python {
   param([string[]]$Arguments)
@@ -32,6 +58,7 @@ Invoke-Python @("-m", "pip", "install", "-r", (Join-Path $RepoRoot "requirements
 
 New-Item -ItemType Directory -Force -Path $DistPath | Out-Null
 New-Item -ItemType Directory -Force -Path $WorkPath | Out-Null
+Remove-PathWithRetries -TargetPath $ExeFolder
 
 Invoke-Python @(
   "-m", "PyInstaller",
@@ -42,7 +69,12 @@ Invoke-Python @(
   $SpecFile
 )
 
+$CloudflaredTarget = Join-Path $ExeFolder "cloudflared.exe"
+Write-Host "Downloading cloudflared for packaged Quick Tunnel support..."
+Invoke-WebRequest -Uri $CloudflaredUrl -OutFile $CloudflaredTarget
+
 Write-Host ""
 Write-Host "Build complete."
-Write-Host ("Executable folder: " + (Join-Path $DistPath "SongWalk"))
-Write-Host ("Run: " + (Join-Path $DistPath "SongWalk\SongWalk.exe"))
+Write-Host ("Executable folder: " + $ExeFolder)
+Write-Host ("Run: " + (Join-Path $ExeFolder "SongWalk.exe"))
+Write-Host ("Bundled tunnel binary: " + $CloudflaredTarget)

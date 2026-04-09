@@ -2,7 +2,7 @@ services:
   songshare:
     environment:
       SONGSHARE_DEV: "1"
-      SONGSHARE_QUICK_TUNNEL_ENABLED: "0"
+      SONGSHARE_QUICK_TUNNEL_ENABLED: "1"
     volumes:
       - ./songshare:/app/songshare
       - ./songshare-data:/data

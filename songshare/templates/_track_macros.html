@@ -1,5 +1,5 @@
 {% macro render_editable_text(field, value, classes='') -%}
-  <span class="{{ classes }} context-edit-target" data-context-edit-field="{{ field }}">{{ value }}</span>
+  <span class="{{ classes }} context-edit-target" data-context-edit-field="{{ field }}" data-inline-edit-field="{{ field }}">{{ value }}</span>
 {%- endmacro %}
 
 {% macro render_track_row(track, library, track_url, tabindex='0', classes='track-row', show_columns=True) -%}

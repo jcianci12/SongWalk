@@ -1,6 +1,6 @@
 (function () {
   // Increment this whenever we need to confirm a fresh JS build is running in the browser.
-  const SCRIPT_VERSION = "2026-04-05-ios-track-skip-1";
+  const SCRIPT_VERSION = "2026-04-08-download-progress-1";
   const DEBUG_FILTERING = true;
 
   function debugLog(scope, ...details) {
@@ -984,6 +984,153 @@
     });
   }
 
+  const downloadLink = document.querySelector("[data-library-download]");
+  const downloadStatusShell = document.querySelector("[data-download-status-shell]");
+  const downloadStatus = document.querySelector("[data-download-status]");
+  const downloadProgress = document.querySelector("[data-download-progress]");
+  const downloadProgressBar = document.querySelector("[data-download-progress-bar]");
+  const downloadProgressCopy = document.querySelector("[data-download-progress-copy]");
+
+  function setDownloadState(message, active) {
+    if (downloadStatus) {
+      downloadStatus.textContent = message || "";
+    }
+    if (downloadStatusShell) {
+      downloadStatusShell.hidden = !active;
+    }
+  }
+
+  function setDownloadProgressKnown(loaded, total) {
+    if (!downloadProgress || !downloadProgressBar || !downloadProgressCopy) {
+      return;
+    }
+
+    const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((loaded / total) * 100))) : 0;
+    downloadProgress.hidden = false;
+    downloadProgressBar.style.width = `${percent}%`;
+    downloadProgressBar.classList.remove("is-indeterminate");
+    downloadProgressCopy.textContent = `${percent}% - ${formatBytes(loaded)} / ${formatBytes(total)}`;
+  }
+
+  function setDownloadProgressUnknown(loaded) {
+    if (!downloadProgress || !downloadProgressBar || !downloadProgressCopy) {
+      return;
+    }
+
+    downloadProgress.hidden = false;
+    downloadProgressBar.style.width = "100%";
+    downloadProgressBar.classList.add("is-indeterminate");
+    downloadProgressCopy.textContent = `${formatBytes(loaded)} downloaded`;
+  }
+
+  function resetDownloadProgress() {
+    if (!downloadProgress || !downloadProgressBar || !downloadProgressCopy) {
+      return;
+    }
+
+    downloadProgress.hidden = true;
+    downloadProgressBar.style.width = "0%";
+    downloadProgressBar.classList.remove("is-indeterminate");
+    downloadProgressCopy.textContent = "0%";
+  }
+
+  function clearDownloadState() {
+    setDownloadState("", false);
+    resetDownloadProgress();
+  }
+
+  function downloadFilenameFromResponse(response, fallbackName) {
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match) {
+      return decodeURIComponent(utf8Match[1]);
+    }
+
+    const plainMatch = disposition.match(/filename=\"?([^\";]+)\"?/i);
+    if (plainMatch) {
+      return plainMatch[1];
+    }
+
+    return fallbackName;
+  }
+
+  function triggerBlobDownload(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  }
+
+  async function startLibraryDownload(link) {
+    const href = link ? (link.getAttribute("href") || "") : "";
+    if (!href) {
+      return;
+    }
+
+    setDownloadState("Preparing library download...", true);
+    resetDownloadProgress();
+
+    try {
+      const response = await fetch(href, {
+        headers: {
+          Accept: "application/zip",
+          "X-Requested-With": "fetch",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not download library.");
+      }
+
+      const total = Number.parseInt(response.headers.get("Content-Length") || "0", 10);
+      const filename = downloadFilenameFromResponse(response, "songwalk-library.zip");
+
+      if (!response.body || typeof response.body.getReader !== "function") {
+        const blob = await response.blob();
+        triggerBlobDownload(blob, filename);
+        setDownloadProgressKnown(blob.size || total || 1, blob.size || total || 1);
+        setDownloadState("Download ready.", true);
+        window.setTimeout(clearDownloadState, 1200);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const chunks = [];
+      let loaded = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        if (value) {
+          chunks.push(value);
+          loaded += value.byteLength;
+          setDownloadState("Downloading library...", true);
+          if (total > 0) {
+            setDownloadProgressKnown(loaded, total);
+          } else {
+            setDownloadProgressUnknown(loaded);
+          }
+        }
+      }
+
+      const blob = new Blob(chunks, { type: response.headers.get("Content-Type") || "application/zip" });
+      triggerBlobDownload(blob, filename);
+      setDownloadProgressKnown(blob.size || loaded || total || 1, blob.size || loaded || total || 1);
+      setDownloadState("Download ready.", true);
+      window.setTimeout(clearDownloadState, 1200);
+    } catch (error) {
+      clearDownloadState();
+      window.alert(error instanceof Error ? error.message : "Could not download library.");
+    }
+  }
+
   const rows = Array.from(document.querySelectorAll("[data-track-row]"));
   const albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
   const albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
@@ -1049,6 +1196,12 @@
 
   let selectedRow = null;
   let selectedRows = [];
+  let selectionAnchorRow = null;
+  let inlineEditRow = null;
+  let inlineEditField = "";
+  let inlineEditInput = null;
+  let inlineEditOriginalValue = "";
+  let inlineEditSaving = false;
   let longPressTimer = null;
   let isShuffleEnabled = false;
   let isRepeatEnabled = false;
@@ -1411,6 +1564,10 @@
       selectedRows = [];
     }
 
+    if (selectionAnchorRow && !visibleSet.has(selectionAnchorRow)) {
+      setSelectionAnchor(selectedRow || visible[0] || null);
+    }
+
     debugLog("selection.sync", {
       visibleRows: visible.length,
       selectedRowId: trackStateFromRow(selectedRow)?.id || "",
@@ -1424,8 +1581,21 @@
     return selectedRows.map((row) => trackStateFromRow(row)?.id).filter(Boolean);
   }
 
+  function setSelectionAnchor(row) {
+    selectionAnchorRow = row && rows.includes(row) ? row : null;
+  }
+
   function isMultiSelectEvent(event) {
     return Boolean(event && (event.ctrlKey || event.metaKey));
+  }
+
+  function isRangeSelectEvent(event) {
+    return Boolean(event && event.shiftKey);
+  }
+
+  function uniqueRowsInDocumentOrder(items) {
+    const seen = new Set(items);
+    return rows.filter((row) => seen.has(row));
   }
 
   function normalizeRating(value) {
@@ -1485,6 +1655,188 @@
       setInlineRatingState(row, previousRating);
       throw error;
     }
+  }
+
+  function editableFieldNode(row, field) {
+    if (!row || !field) {
+      return null;
+    }
+
+    return row.querySelector(`[data-context-edit-field="${field}"]`);
+  }
+
+  function rowFieldValue(row, field) {
+    const track = trackStateFromRow(row);
+    if (!track) {
+      return "";
+    }
+
+    if (field === "artist") {
+      return track.artist;
+    }
+    if (field === "album") {
+      return track.album;
+    }
+    return track.title;
+  }
+
+  function isInlineEditTarget(target) {
+    return Boolean(
+      target
+      && typeof target.closest === "function"
+      && target.closest(".inline-edit-input"),
+    );
+  }
+
+  function cancelInlineEdit() {
+    if (!inlineEditRow || !inlineEditField) {
+      inlineEditRow = null;
+      inlineEditField = "";
+      inlineEditInput = null;
+      inlineEditOriginalValue = "";
+      inlineEditSaving = false;
+      return;
+    }
+
+    const fieldNode = editableFieldNode(inlineEditRow, inlineEditField);
+    if (fieldNode) {
+      fieldNode.textContent = inlineEditOriginalValue;
+      fieldNode.classList.remove("is-inline-editing");
+    }
+
+    inlineEditRow = null;
+    inlineEditField = "";
+    inlineEditInput = null;
+    inlineEditOriginalValue = "";
+    inlineEditSaving = false;
+  }
+
+  async function submitTrackUpdate(row, values, busyMessage = "Saving track...") {
+    const track = trackStateFromRow(row);
+    const updateUrl = track ? track.updateUrl : "";
+    if (!updateUrl) {
+      throw new Error("Could not save track.");
+    }
+
+    const formData = new FormData();
+    formData.set("title", values.title || "");
+    formData.set("artist", values.artist || "");
+    formData.set("album", values.album || "");
+    formData.set("rating", String(values.rating ?? 0));
+
+    const response = await withGlobalBusy(busyMessage, async () => {
+      return await fetch(updateUrl, {
+        method: "POST",
+        headers: { Accept: "application/json", "X-Requested-With": "fetch" },
+        body: formData,
+      });
+    });
+
+    if (!response.ok) {
+      throw new Error("Could not save track.");
+    }
+  }
+
+  async function commitInlineEdit() {
+    if (!inlineEditRow || !inlineEditField || !inlineEditInput || inlineEditSaving) {
+      return;
+    }
+
+    const nextValue = inlineEditInput.value;
+    if (nextValue === inlineEditOriginalValue) {
+      cancelInlineEdit();
+      return;
+    }
+
+    inlineEditSaving = true;
+    inlineEditInput.disabled = true;
+
+    try {
+      const track = trackStateFromRow(inlineEditRow);
+      await submitTrackUpdate(
+        inlineEditRow,
+        {
+          title: inlineEditField === "title" ? nextValue : (track ? track.title : ""),
+          artist: inlineEditField === "artist" ? nextValue : (track ? track.artist : ""),
+          album: inlineEditField === "album" ? nextValue : (track ? track.album : ""),
+          rating: track ? track.rating : 0,
+        },
+        `Saving ${inlineEditField}...`,
+      );
+      window.location.reload();
+    } catch (error) {
+      inlineEditSaving = false;
+      inlineEditInput.disabled = false;
+      inlineEditInput.focus();
+      inlineEditInput.select();
+      window.alert(error instanceof Error ? error.message : "Could not save track.");
+    }
+  }
+
+  function beginInlineEdit(row, field) {
+    if (!row || !field || selectedRows.length !== 1 || selectedRow !== row) {
+      return;
+    }
+
+    if (inlineEditRow === row && inlineEditField === field) {
+      return;
+    }
+
+    cancelInlineEdit();
+    hideContextMenu();
+    setEditorAccordionOpen(false);
+
+    const fieldNode = editableFieldNode(row, field);
+    if (!fieldNode) {
+      return;
+    }
+
+    const currentValue = rowFieldValue(row, field);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "inline-edit-input";
+    input.value = currentValue;
+    input.setAttribute("aria-label", `Edit ${field}`);
+
+    fieldNode.textContent = "";
+    fieldNode.classList.add("is-inline-editing");
+    fieldNode.appendChild(input);
+
+    inlineEditRow = row;
+    inlineEditField = field;
+    inlineEditInput = input;
+    inlineEditOriginalValue = currentValue;
+    inlineEditSaving = false;
+
+    ["click", "dblclick", "mousedown", "contextmenu"].forEach((eventName) => {
+      input.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      });
+    });
+
+    input.addEventListener("keydown", async (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        await commitInlineEdit();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelInlineEdit();
+      }
+    });
+
+    input.addEventListener("blur", async () => {
+      if (!inlineEditSaving) {
+        await commitInlineEdit();
+      }
+    });
+
+    window.requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
   }
 
   function setEditorEnabled(enabled) {
@@ -1950,10 +2302,10 @@
 
   function renderMultiSelection() {
     titleTarget.textContent = `${selectedRows.length} tracks selected`;
-    metaTarget.textContent = "Ctrl/Cmd click adds or removes tracks. Delete removes the whole selection.";
+    metaTarget.textContent = "Shift click selects a range. Ctrl/Cmd click adds or removes tracks. Delete removes the whole selection.";
     setTransportSelectionSummary(
       `${selectedRows.length} tracks selected`,
-      "Open to review the selection state or delete the selected tracks.",
+      "Open to review the selection state, edit one track, or delete the selected tracks.",
     );
     setArtFrame(artTarget, "", String(selectedRows.length));
     setEditorAccordionOpen(false);
@@ -2099,8 +2451,12 @@
     }
     contextMenu.dataset.editField = editField || "";
     contextMenu.hidden = false;
-    contextMenu.style.left = `${event.clientX}px`;
-    contextMenu.style.top = `${event.clientY}px`;
+    const gutter = 12;
+    const rect = contextMenu.getBoundingClientRect();
+    const maxLeft = Math.max(gutter, window.innerWidth - rect.width - gutter);
+    const maxTop = Math.max(gutter, window.innerHeight - rect.height - gutter);
+    contextMenu.style.left = `${Math.min(Math.max(gutter, event.clientX), maxLeft)}px`;
+    contextMenu.style.top = `${Math.min(Math.max(gutter, event.clientY), maxTop)}px`;
   }
 
   function selectRow(row, autoplay) {
@@ -2108,10 +2464,39 @@
       return;
     }
 
+    cancelInlineEdit();
     setEditorAccordionOpen(false);
     selectedRow = row;
     selectedRows = [row];
+    setSelectionAnchor(row);
     renderSelection(autoplay);
+  }
+
+  function selectRowRange(row, { append = false } = {}) {
+    if (!row) {
+      return;
+    }
+
+    cancelInlineEdit();
+    const visible = visibleRows();
+    const anchor = selectionAnchorRow && visible.includes(selectionAnchorRow)
+      ? selectionAnchorRow
+      : (selectedRow && visible.includes(selectedRow) ? selectedRow : row);
+    const anchorIndex = visible.indexOf(anchor);
+    const targetIndex = visible.indexOf(row);
+
+    if (anchorIndex === -1 || targetIndex === -1) {
+      selectRow(row, false);
+      return;
+    }
+
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    const range = visible.slice(start, end + 1);
+    selectedRows = append ? uniqueRowsInDocumentOrder([...selectedRows, ...range]) : range;
+    selectedRow = row;
+    setEditorAccordionOpen(false);
+    renderSelection(false);
   }
 
   function toggleRowSelection(row) {
@@ -2119,10 +2504,12 @@
       return;
     }
 
+    cancelInlineEdit();
     if (selectedRows.includes(row)) {
       if (selectedRows.length === 1) {
         selectedRows = [];
         selectedRow = null;
+        setSelectionAnchor(null);
         setEditorAccordionOpen(false);
         renderSelection(false);
         return;
@@ -2132,6 +2519,7 @@
       if (selectedRow === row) {
         selectedRow = selectedRows[selectedRows.length - 1] || null;
       }
+      setSelectionAnchor(selectedRow || row);
       setEditorAccordionOpen(false);
       renderSelection(false);
       return;
@@ -2139,6 +2527,7 @@
 
     selectedRows = [...selectedRows, row];
     selectedRow = row;
+    setSelectionAnchor(row);
     setEditorAccordionOpen(false);
     renderSelection(false);
   }
@@ -2321,6 +2710,21 @@
 
     rows.forEach((row) => {
       row.addEventListener("click", (event) => {
+        if (isInlineEditTarget(event.target)) {
+          return;
+        }
+
+        const editField = contextEditFieldFromTarget(event.target);
+        if (editField && selectedRows.length === 1 && selectedRow === row) {
+          beginInlineEdit(row, editField);
+          return;
+        }
+
+        if (isRangeSelectEvent(event)) {
+          selectRowRange(row, { append: isMultiSelectEvent(event) });
+          return;
+        }
+
         if (isMultiSelectEvent(event)) {
           toggleRowSelection(row);
           return;
@@ -2336,11 +2740,23 @@
 
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
+          if (isRangeSelectEvent(event)) {
+            selectRowRange(row, { append: isMultiSelectEvent(event) });
+            return;
+          }
+          if (isMultiSelectEvent(event)) {
+            toggleRowSelection(row);
+            return;
+          }
           selectRow(row, false);
         }
       });
 
-      row.addEventListener("dblclick", () => {
+      row.addEventListener("dblclick", (event) => {
+        if (contextEditFieldFromTarget(event.target) || isInlineEditTarget(event.target)) {
+          return;
+        }
+
         selectRow(row, true);
       });
 
@@ -2475,6 +2891,11 @@
       return;
     }
 
+    if (inlineEditRow) {
+      cancelInlineEdit();
+      return;
+    }
+
     hideContextMenu();
     if (toggleLibraryDrawerButton && toggleLibraryDrawerButton.getAttribute("aria-expanded") === "true") {
       setLibraryDrawerOpen(false);
@@ -2506,6 +2927,17 @@
 
   if (lookupSearchButton) {
     lookupSearchButton.addEventListener("click", runLookupSearch);
+  }
+
+  if (downloadLink) {
+    downloadLink.addEventListener("click", async (event) => {
+      if (!window.fetch || !window.Blob || !window.URL || typeof window.URL.createObjectURL !== "function") {
+        return;
+      }
+
+      event.preventDefault();
+      await startLibraryDownload(downloadLink);
+    });
   }
 
   if (toggleSelectionPanelButton) {
@@ -2607,24 +3039,18 @@
   if (editForm) {
     editForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      if (!editForm.action) {
+      if (!editForm.action || !selectedRow) {
         return;
       }
 
       saveButton.disabled = true;
       try {
-        const response = await withGlobalBusy("Saving track...", async () => {
-          return await fetch(editForm.action, {
-            method: "POST",
-            headers: { Accept: "application/json", "X-Requested-With": "fetch" },
-            body: new FormData(editForm),
-          });
+        await submitTrackUpdate(selectedRow, {
+          title: titleInput ? titleInput.value : "",
+          artist: artistInput ? artistInput.value : "",
+          album: albumInput ? albumInput.value : "",
+          rating: ratingInput ? ratingInput.value : "0",
         });
-
-        if (!response.ok) {
-          return;
-        }
-
         window.location.reload();
       } finally {
         saveButton.disabled = false;

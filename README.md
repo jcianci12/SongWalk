@@ -61,11 +61,26 @@ For YouTube and Spotify imports in a plain Python install, make sure `ffmpeg` is
 
 For a local desktop executable, use the PyInstaller build path documented in [docs/desktop-packaging.md](docs/desktop-packaging.md).
 
+The packaged Windows app now runs as a tray app:
+
+- turns Quick Tunnel on by default in the packaged desktop runtime unless you explicitly set `SONGSHARE_QUICK_TUNNEL_ENABLED=0`
+- bundles `cloudflared.exe` next to `SongWalk.exe`, so the EXE can bring Cloudflare online without a separate machine-wide install
+- opens the owner dashboard on startup, waiting for the public owner page to become reachable before falling back to `localhost`
+- double-clicks to the owner dashboard, preferring the public tunnel URL over `localhost`
+- right-click for `Open owner dashboard`, `Open SongWalk`, `Open data folder`, and `Quit SongWalk`
+- when launched from the packaged build, `songshare-data/` defaults to a folder next to `SongWalk.exe` so the app stays portable
+
+The built executable lives at:
+
+```text
+build/pyinstaller/dist/windows/SongWalk/SongWalk.exe
+```
+
 If you open root directly on `localhost`, SongWalk now shows a local launch page with the owner dashboard link plus Quick Tunnel on/off controls and the current public host when it is online.
 
 For public hosts, tunnels, and reverse proxies, root stays in share-access mode and does not reveal library IDs.
 
-SongWalk also writes a private owner URL to `songshare-data/owner-url.txt` and prints it on startup for library management access.
+SongWalk also writes a private owner URL to `songshare-data/owner-url.txt` for library management access.
 
 ## Dev Mode
 
@@ -104,7 +119,7 @@ For live-reload development inside Docker, use the dev override:
 docker compose -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-`compose.dev.yaml` enables `SONGSHARE_DEV=1`, disables the Quick Tunnel manager, and bind-mounts `./songshare` into `/app/songshare`, so Python, template, CSS, and JS edits are picked up without rebuilding the image each time.
+`compose.dev.yaml` enables `SONGSHARE_DEV=1`, keeps the Quick Tunnel manager enabled, and bind-mounts `./songshare` into `/app/songshare`, so Python, template, CSS, and JS edits are picked up without rebuilding the image each time.
 
 The container image now includes `ffmpeg`, `yt-dlp`, and `spotdl`, so the `/import` page works inside Docker without extra setup.
 
@@ -139,7 +154,7 @@ Then open `http://localhost:8080/` locally. The launch page shows:
 - A button to bring SongWalk online or take it offline
 - A button to rotate the tunnel
 
-For plain `python -m songshare`, Quick Tunnel startup is optional. Install `cloudflared` yourself and set `SONGSHARE_QUICK_TUNNEL_ENABLED=1` if you want the same in-app behavior outside Docker.
+For the packaged Windows EXE, Quick Tunnel starts by default and the app opens the public owner page when it becomes reachable. For plain `python -m songshare`, Quick Tunnel startup is still optional. Install `cloudflared` yourself and set `SONGSHARE_QUICK_TUNNEL_ENABLED=1` if you want the same in-app behavior outside Docker.
 
 Quick Tunnels are for testing and demos only. They are temporary, have a limit of 200 in-flight requests, and do not support Server-Sent Events.
 

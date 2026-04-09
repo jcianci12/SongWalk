@@ -754,6 +754,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     continue
                 archive.write(file_path, arcname=archive_track_path(track, used_paths))
 
+        archive_size = archive_file.tell()
         archive_file.seek(0)
         response = send_file(
             archive_file,
@@ -762,6 +763,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             download_name=f"songwalk-library-{library.id}.zip",
             max_age=0 if app.config["DEV_MODE"] else None,
         )
+        response.content_length = archive_size
         response.call_on_close(archive_file.close)
         return response
 

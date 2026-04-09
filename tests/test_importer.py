@@ -28,10 +28,11 @@ def _resolve_test_tmp_root() -> Path:
 
 
 TEST_TMP_ROOT = _resolve_test_tmp_root()
+TEST_DATA_ROOT = TEST_TMP_ROOT / "data"
 
 
 def new_test_dir() -> Path:
-    path = TEST_TMP_ROOT / str(uuid.uuid4())
+    path = TEST_DATA_ROOT / str(uuid.uuid4())
     path.mkdir(parents=True, exist_ok=False)
     return path
 

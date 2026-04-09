@@ -29,8 +29,17 @@
               <span class="upload-progress-copy" data-upload-progress-copy>0%</span>
             </div>
           </div>
+          <div class="title-upload-status" data-download-status-shell hidden>
+            <p class="status-line title-upload-copy" data-download-status>Preparing library download...</p>
+            <div class="upload-progress title-upload-progress" data-download-progress hidden>
+              <div class="upload-progress-track">
+                <div class="upload-progress-bar" data-download-progress-bar></div>
+              </div>
+              <span class="upload-progress-copy" data-download-progress-copy>0%</span>
+            </div>
+          </div>
           <a class="frame-button" href="{{ url_for('view_import', library_id=library.id) }}">Import</a>
-          <a class="frame-button" href="{{ url_for('download_library', library_id=library.id) }}">Download</a>
+          <a class="frame-button" href="{{ url_for('download_library', library_id=library.id) }}" data-library-download>Download</a>
           <a class="frame-button" href="{{ url_for('home') }}">Share access</a>
           <button type="button" class="frame-button" data-copy="{{ share_url }}">Copy share link</button>
         </div>
@@ -448,6 +457,15 @@
     <div class="context-menu" id="track-context-menu" hidden>
       <button type="button" class="context-menu-item" id="context-edit-field">Edit details</button>
       <button type="button" class="context-menu-item" id="context-find-album-info">Find album info</button>
+      <div class="context-menu-divider" role="separator"></div>
+      {% set collection_scope = 'tracks' %}
+      {% set collection_heading = 'Group from track selection' %}
+      {% set collection_empty_summary = 'Use selected track rows to group whole albums into a collection.' %}
+      {% set collection_item_singular = 'album' %}
+      {% set collection_item_plural = 'albums' %}
+      {% set collection_note = 'Track selection is collapsed to full albums before grouping, so one row from an album is enough.' %}
+      {% set collection_studio_classes = 'context-menu-collection-studio' %}
+      {% include '_collection_studio.html' %}
     </div>
 
     <div class="window-drop-overlay" id="window-drop-overlay" hidden>

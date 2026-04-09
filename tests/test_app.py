@@ -27,10 +27,11 @@ def _resolve_test_tmp_root() -> Path:
 
 
 TEST_TMP_ROOT = _resolve_test_tmp_root()
+TEST_DATA_ROOT = TEST_TMP_ROOT / "data"
 
 
 def new_test_dir() -> Path:
-    path = TEST_TMP_ROOT / str(uuid.uuid4())
+    path = TEST_DATA_ROOT / str(uuid.uuid4())
     path.mkdir(parents=True, exist_ok=False)
     return path
 
@@ -581,9 +582,11 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"Track selection is collapsed to full albums before grouping", page.data)
         self.assertIn(b"Demo Singles", page.data)
         self.assertIn(b"data-collection-summary-list", page.data)
-        self.assertIn(b"data-collection-membership", page.data)
+        self.assertIn(b"collection-track-label", page.data)
         self.assertIn(b"data-track-album-key", page.data)
         self.assertIn(b"data-track-album-track-ids", page.data)
+        self.assertIn(b"context-menu-collection-studio", page.data)
+        self.assertIn(b'id="track-context-menu"', page.data)
 
     def test_library_view_renders_drawer_import_controls(self) -> None:
         response = self.create_library()
@@ -597,6 +600,8 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(page.data.count(b">Download<"), 1)
         self.assertIn(b"Search tracks and albums", page.data)
         self.assertIn(b"data-upload-status-shell", page.data)
+        self.assertIn(b"data-download-status-shell", page.data)
+        self.assertIn(b"data-library-download", page.data)
 
     def test_owner_dashboard_renders_rename_controls(self) -> None:
         response = self.create_library()
@@ -645,6 +650,7 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response.mimetype, "application/zip")
         self.assertIn(f"songwalk-library-{library_id}.zip", download_response.headers["Content-Disposition"])
+        self.assertGreater(int(download_response.headers["Content-Length"]), 0)
 
         archive = zipfile.ZipFile(io.BytesIO(download_response.data))
         self.assertEqual(
@@ -726,6 +732,58 @@ class SongshareAppTestCase(unittest.TestCase):
 
         updated_library = self.app.config["STORE"].get_library(library_id)
         self.assertEqual(updated_library.tracks[0].rating, 5)
+
+    def test_update_track_endpoint_updates_metadata(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={"tracks": (io.BytesIO(b"FAKE-demo-track"), "demo.mp3")},
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        track_id = library.tracks[0].id
+
+        response = self.client.post(
+            f"/s/{library_id}/tracks/{track_id}",
+            data={
+                "title": "Inline Title",
+                "artist": "Inline Artist",
+                "album": "Inline Album",
+                "rating": "4",
+            },
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+
+        updated_library = self.app.config["STORE"].get_library(library_id)
+        self.assertEqual(updated_library.tracks[0].title, "Inline Title")
+        self.assertEqual(updated_library.tracks[0].artist, "Inline Artist")
+        self.assertEqual(updated_library.tracks[0].album, "Inline Album")
+        self.assertEqual(updated_library.tracks[0].rating, 4)
+
+    def test_track_view_renders_inline_edit_fields(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={"tracks": (io.BytesIO(b"FAKE-demo-track"), "demo.mp3")},
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        page = self.client.get(library_path)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'data-inline-edit-field="title"', page.data)
+        self.assertIn(b'data-inline-edit-field="artist"', page.data)
+        self.assertIn(b'data-inline-edit-field="album"', page.data)
 
     def test_youtube_import_endpoint_uses_import_service(self) -> None:
         temp_dir = new_test_dir()

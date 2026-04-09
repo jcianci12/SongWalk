@@ -10,11 +10,22 @@ SongWalk is a small self-hosted music dropbox with a shared UUID link per librar
 
 The product branding is `SongWalk`. The current module names, commands, and environment variables still use the existing `songshare` and `SONGSHARE_*` identifiers.
 
+## Quick Start
+
+If you are on Windows and have the packaged desktop build, the shortest path is now:
+
+1. Run `SongWalk.exe`.
+2. Wait for the browser to open the owner dashboard.
+3. Create a library and copy the share URL.
+4. Send it.
+
+The EXE starts the local server, brings Cloudflare Quick Tunnel online automatically, and opens the public owner page when it is reachable.
+
 ## Share First
 
 SongWalk is built around one idea: EASILY spin it up, create a library, copy its share URL, and send it to someone immediately.
 
-Docker Compose now starts a Cloudflare Quick Tunnel automatically, so the local `/` page shows the current public host and lets you rotate it without running a separate helper script.
+On Windows, the packaged EXE now does that directly. Run it, wait for the owner page to open, create a library, and share the resulting public link. Docker Compose still supports the same flow for non-desktop use.
 
 - Anyone with the share URL can open that library.
 - Anyone with the share URL can upload tracks and edit metadata in that library.
@@ -26,7 +37,14 @@ Looks like windows media player (In my opinion the best version)
 
 ## Fast Public Exposure
 
-For the fastest zero-account demo flow:
+For the fastest zero-account demo flow on Windows:
+
+1. Run `SongWalk.exe`.
+2. Wait for the owner dashboard to open.
+3. Create a library.
+4. Copy its share URL and send it.
+
+For Docker instead:
 
 1. Run `docker compose up --build`.
 2. Open `http://localhost:8080/`.
@@ -75,6 +93,8 @@ The built executable lives at:
 ```text
 build/pyinstaller/dist/windows/SongWalk/SongWalk.exe
 ```
+
+For a normal Windows first run, that EXE is now the recommended entry point.
 
 If you open root directly on `localhost`, SongWalk now shows a local launch page with the owner dashboard link plus Quick Tunnel on/off controls and the current public host when it is online.
 

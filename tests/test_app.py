@@ -541,7 +541,7 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"data-target-album-section", page.data)
         self.assertIn(b"is-target-album", page.data)
 
-    def test_track_view_renders_manual_collection_controls(self) -> None:
+    def test_track_view_renders_manual_collection_controls_in_context_menu(self) -> None:
         response = self.create_library()
         library_path = response.headers["Location"].split("?", 1)[0]
 
@@ -577,7 +577,8 @@ class SongshareAppTestCase(unittest.TestCase):
 
         page = self.client.get(f"{library_path}?view=tracks")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Group from track selection", page.data)
+        self.assertEqual(page.data.count(b"Group from track selection"), 1)
+        self.assertEqual(page.data.count(b"collection-studio context-menu-collection-studio"), 1)
         self.assertIn(b'data-collection-selection-scope="tracks"', page.data)
         self.assertIn(b"Track selection is collapsed to full albums before grouping", page.data)
         self.assertIn(b"Demo Singles", page.data)

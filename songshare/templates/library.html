@@ -244,13 +244,6 @@
               {% endif %}
             </section>
           {% else %}
-            {% set collection_scope = 'tracks' %}
-            {% set collection_heading = 'Group from track selection' %}
-            {% set collection_empty_summary = 'Use selected track rows to group whole albums into a collection.' %}
-            {% set collection_item_singular = 'album' %}
-            {% set collection_item_plural = 'albums' %}
-            {% set collection_note = 'Track selection is collapsed to full albums before grouping, so one row from an album is enough.' %}
-            {% include '_collection_studio.html' %}
             <section class="table-shell media-shell">
               <div class="table-head media-head">
                 <span>Album</span>

@@ -9,7 +9,15 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
   </head>
-  <body class="wmp-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
+  <body
+    class="wmp-page"
+    data-dev-mode="{{ '1' if dev_mode else '0' }}"
+    data-library-id="{{ library.id }}"
+    data-library-track-count="{{ library.tracks|length }}"
+    data-library-updated-at="{{ library.updated_at.isoformat() }}"
+    data-library-state-url="{{ url_for('library_state', library_id=library.id) }}"
+    data-wmp-library="{{ '1' if is_wmp_library else '0' }}"
+  >
     <div class="wmp-window">
       <header class="title-band">
         <div class="title-band-left">
@@ -60,54 +68,60 @@
         </aside>
 
         <main class="content-pane">
-          <div class="view-band">
-            <div class="view-band-main">
-              <div class="drawer-handle-row">
-                <button
-                  type="button"
-                  class="drawer-handle-button"
-                  id="toggle-library-drawer"
-                  aria-controls="library-navigation"
-                  aria-expanded="false"
-                  aria-label="Open library drawer"
-                  title="Open library drawer"
-                >
-                  <span aria-hidden="true">&#9881;</span>
-                </button>
-                <div>
-                  <p class="view-caption">All music</p>
-                  <h1>{{ library.display_name }}</h1>
-                  <p class="view-meta library-id-inline">{{ library.id }}</p>
+          <div data-library-live-region>
+            <div class="view-band">
+              <div class="view-band-main">
+                <div class="drawer-handle-row">
+                  <button
+                    type="button"
+                    class="drawer-handle-button"
+                    id="toggle-library-drawer"
+                    aria-controls="library-navigation"
+                    aria-expanded="false"
+                    aria-label="Open library drawer"
+                    title="Open library drawer"
+                  >
+                    <span aria-hidden="true">&#9881;</span>
+                  </button>
+                  <div>
+                    <p class="view-caption">All music</p>
+                    <h1>{{ library.display_name }}</h1>
+                    <p class="view-meta library-id-inline">{{ library.id }}</p>
+                  </div>
+                </div>
+              </div>
+              <div class="view-band-actions">
+                <div class="view-switcher">
+                  <a class="frame-button{% if view_mode == 'tracks' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='tracks') }}">Tracks</a>
+                  <a class="frame-button{% if view_mode == 'albums' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='albums') }}">Albums</a>
+                </div>
+                <div class="search-stack">
+                  <input type="search" placeholder="Search tracks and albums" data-track-filter>
+                  <span class="view-meta">
+                    {% if view_mode == 'albums' %}
+                      {{ album_count }} album{% if album_count != 1 %}s{% endif %}
+                    {% else %}
+                      {{ library.tracks|length }} track{% if library.tracks|length != 1 %}s{% endif %}
+                    {% endif %}
+                  </span>
                 </div>
               </div>
             </div>
-            <div class="view-band-actions">
-              <div class="view-switcher">
-                <a class="frame-button{% if view_mode == 'tracks' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='tracks') }}">Tracks</a>
-                <a class="frame-button{% if view_mode == 'albums' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='albums') }}">Albums</a>
-              </div>
-              <div class="search-stack">
-                <input type="search" placeholder="Search tracks and albums" data-track-filter>
-                <span class="view-meta">
-                  {% if view_mode == 'albums' %}
-                    {{ album_count }} album{% if album_count != 1 %}s{% endif %}
-                  {% else %}
-                    {{ library.tracks|length }} track{% if library.tracks|length != 1 %}s{% endif %}
-                  {% endif %}
-                </span>
-              </div>
-            </div>
-          </div>
 
-          {% if notice %}
-            <div class="flash notice">{{ notice }}</div>
-          {% endif %}
-          {% if error %}
-            <div class="flash error">{{ error }}</div>
-          {% endif %}
+            {% if notice %}
+              <div class="flash notice">{{ notice }}</div>
+            {% endif %}
+            {% if error %}
+              <div class="flash error">{{ error }}</div>
+            {% endif %}
+            {% if is_wmp_library %}
+              <div class="flash notice" data-library-live-sync hidden>
+                Windows Media Player sync is running. The song list will update as chunks are saved.
+              </div>
+            {% endif %}
 
-          {% if view_mode == 'albums' %}
-            <section class="album-browser-shell">
+            {% if view_mode == 'albums' %}
+              <section class="album-browser-shell">
               {% set collection_scope = 'albums' %}
               {% set collection_heading = 'Group albums yourself' %}
               {% set collection_empty_summary = 'Select albums, then create a collection or add them to an existing one.' %}
@@ -145,6 +159,9 @@
                         </div>
                         <div class="album-cover-meta">
                           <p class="album-title">{{ collection.name }}</p>
+                          {% if collection.source_kind == 'wmp_playlist' %}
+                            <p class="collection-membership-badge">Playlist</p>
+                          {% endif %}
                           <p class="album-cover-artist">{{ collection.album_count }} albums - {{ collection.track_count }} tracks</p>
                         </div>
                         <div class="collection-album-list" data-collection-panel hidden>
@@ -242,9 +259,9 @@
               {% else %}
                 <div class="empty-table">No tracks yet. Import some music to populate the library view.</div>
               {% endif %}
-            </section>
-          {% else %}
-            <section class="table-shell media-shell">
+              </section>
+            {% else %}
+              <section class="table-shell media-shell">
               <div class="table-head media-head">
                 <span>Album</span>
                 <span>#</span>
@@ -283,7 +300,7 @@
                             {% endfor %}
                           </div>
                           <div class="album-meta">
-                            <p class="collection-track-label">Collection</p>
+                            <p class="collection-track-label">{% if collection.source_kind == 'wmp_playlist' %}Playlist{% else %}Collection{% endif %}</p>
                             <p class="album-title">{{ collection.name }}</p>
                             <p>{{ collection.album_count }} album{% if collection.album_count != 1 %}s{% endif %} &middot; {{ collection.track_count }} track{% if collection.track_count != 1 %}s{% endif %}</p>
                             <div class="collection-track-album-list" aria-label="Albums in {{ collection.name }}">
@@ -357,8 +374,9 @@
               {% else %}
                 <div class="empty-table">No tracks yet. Import some music to populate the library view.</div>
               {% endif %}
-            </section>
-          {% endif %}
+              </section>
+            {% endif %}
+          </div>
 
           <section class="details-shell">
             <div class="transport-selection-shell">

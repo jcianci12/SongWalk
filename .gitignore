@@ -8,4 +8,6 @@ venv/
 songshare-data/
 build/pyinstaller/build/
 build/pyinstaller/dist/
+build/pyinstaller-live*/
+build/pyinstaller/vendor/cloudflared-windows-amd64.exe
 /*-*-*-*-*/

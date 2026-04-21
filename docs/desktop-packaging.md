@@ -17,12 +17,21 @@ The script:
 - Builds an onedir Windows tray app from `build/pyinstaller/launcher.py`
 - Bundles `templates`, `static`, and `images` into the app folder
 - Downloads the official 64-bit `cloudflared.exe` into the app folder so Quick Tunnel works from the packaged runtime
+- Stops only `SongWalk.exe` and `cloudflared.exe` processes that are already running from the current build output folder before it replaces that folder, unless you pass `-SkipPackagedProcessShutdown`
 
 Output lands in:
 
 ```text
 build/pyinstaller/dist/windows/SongWalk/SongWalk.exe
 ```
+
+For automatic rebuilds while editing, run the watcher:
+
+```powershell
+.\build\pyinstaller\watch-windows.ps1
+```
+
+The watcher monitors `songshare/`, the PyInstaller launcher/spec, and requirements files. It performs one initial build, then recreates the exe after source changes settle for a few seconds. Dependency install is skipped after the initial successful build unless a requirements file changes. Rebuilds reuse the same build script behavior, so only matching packaged `SongWalk.exe` and `cloudflared.exe` processes from the output folder are stopped before the folder is replaced.
 
 Run the executable from that folder. The packaged app:
 

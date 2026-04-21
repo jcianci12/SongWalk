@@ -20,6 +20,8 @@
     data-track-filename="{{ track.original_name }}"
     data-track-size="{{ track.size|filesize }}"
     data-track-updated="{{ track.updated_at|friendly_time }}"
+    data-track-source-kind="{{ track.source_kind }}"
+    data-track-source-available="{{ '1' if track.source_available else '0' }}"
     data-track-update-url="{{ url_for('update_track', library_id=library.id, track_id=track.id) }}"
     data-track-rating-url="{{ url_for('set_track_rating', library_id=library.id, track_id=track.id) }}"
     data-track-delete-url="{{ url_for('delete_track', library_id=library.id, track_id=track.id) }}"

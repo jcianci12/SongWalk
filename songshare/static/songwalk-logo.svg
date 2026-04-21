@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="SongWalk logo">
+  <rect width="96" height="96" rx="16" fill="#f7fbff"/>
+  <rect x="8" y="8" width="80" height="80" rx="12" fill="none" stroke="#4f7ea9" stroke-width="4"/>
+  <path d="M34 64V30h30v10H44v7h16v10H44v7z" fill="#244a73"/>
+  <circle cx="63" cy="64" r="10" fill="#2c82d3"/>
+  <path d="M63 56v16M55 64h16" stroke="#f7fbff" stroke-width="4" stroke-linecap="round"/>
+</svg>

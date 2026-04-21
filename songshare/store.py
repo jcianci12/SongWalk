@@ -66,6 +66,15 @@ class Track:
     cover_art_name: str = ""
     musicbrainz_release_id: str = ""
     musicbrainz_release_group_id: str = ""
+    source_kind: str = "uploaded"
+    source_path: str = ""
+    source_external_id: str = ""
+    source_available: bool = True
+    duration_seconds: float = 0.0
+    genre: str = ""
+    album_artist: str = ""
+    play_count: int = 0
+    last_played_at: str = ""
 
     @classmethod
     def from_dict(cls, payload: dict) -> "Track":
@@ -84,6 +93,15 @@ class Track:
             cover_art_name=payload.get("cover_art_name", ""),
             musicbrainz_release_id=payload.get("musicbrainz_release_id", ""),
             musicbrainz_release_group_id=payload.get("musicbrainz_release_group_id", ""),
+            source_kind=payload.get("source_kind", "uploaded"),
+            source_path=payload.get("source_path", ""),
+            source_external_id=payload.get("source_external_id", ""),
+            source_available=payload.get("source_available", True),
+            duration_seconds=float(payload.get("duration_seconds", 0.0) or 0.0),
+            genre=payload.get("genre", ""),
+            album_artist=payload.get("album_artist", ""),
+            play_count=int(payload.get("play_count", 0) or 0),
+            last_played_at=payload.get("last_played_at", ""),
         )
 
     def to_dict(self) -> dict:
@@ -100,6 +118,8 @@ class Collection:
     track_ids: list[str]
     created_at: datetime
     updated_at: datetime
+    source_kind: str = "manual"
+    source_external_id: str = ""
 
     @classmethod
     def from_dict(cls, payload: dict) -> "Collection":
@@ -109,6 +129,8 @@ class Collection:
             track_ids=[str(track_id) for track_id in payload.get("track_ids", [])],
             created_at=datetime.fromisoformat(payload["created_at"]),
             updated_at=datetime.fromisoformat(payload["updated_at"]),
+            source_kind=payload.get("source_kind", "manual"),
+            source_external_id=payload.get("source_external_id", ""),
         )
 
     def to_dict(self) -> dict:
@@ -118,6 +140,8 @@ class Collection:
             "track_ids": self.track_ids,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "source_kind": self.source_kind,
+            "source_external_id": self.source_external_id,
         }
 
 
@@ -318,6 +342,228 @@ class Store:
             self._write_library(library)
             return track
 
+    def sync_linked_tracks(
+        self,
+        library_id: str,
+        *,
+        source_kind: str,
+        tracks: list[dict],
+        mark_missing_unavailable: bool = True,
+    ) -> dict:
+        clean_source_kind = source_kind.strip().lower()
+        if not clean_source_kind or clean_source_kind == "uploaded":
+            raise ValueError("A non-uploaded source kind is required.")
+
+        with self._lock:
+            library = self.get_library(library_id)
+            now = _now()
+            existing_by_key = {
+                track.source_external_id: track
+                for track in library.tracks
+                if track.source_kind == clean_source_kind and track.source_external_id
+            }
+            existing_by_path = {
+                track.source_path.casefold(): track
+                for track in library.tracks
+                if track.source_kind == clean_source_kind and track.source_path
+            }
+            seen_track_ids: set[str] = set()
+            created = 0
+            updated = 0
+            skipped = 0
+
+            for payload in tracks:
+                source_path = str(payload.get("source_path", "")).strip()
+                if not source_path:
+                    skipped += 1
+                    continue
+
+                source_external_id = str(payload.get("source_external_id", "")).strip() or source_path
+                track = existing_by_key.get(source_external_id) or existing_by_path.get(source_path.casefold())
+                if track is None:
+                    track = Track(
+                        id=str(uuid.uuid4()),
+                        original_name=str(payload.get("original_name", "")).strip() or Path(source_path).name,
+                        stored_name="",
+                        content_type=str(payload.get("content_type", "")).strip()
+                        or mimetypes.guess_type(source_path)[0]
+                        or "application/octet-stream",
+                        size=_int_value(payload.get("size")),
+                        uploaded_at=now,
+                        updated_at=now,
+                        source_kind=clean_source_kind,
+                        source_path=source_path,
+                        source_external_id=source_external_id,
+                    )
+                    library.tracks.append(track)
+                    created += 1
+                else:
+                    updated += 1
+
+                track.original_name = str(payload.get("original_name", "")).strip() or Path(source_path).name
+                track.content_type = (
+                    str(payload.get("content_type", "")).strip()
+                    or mimetypes.guess_type(track.original_name or source_path)[0]
+                    or "application/octet-stream"
+                )
+                track.size = _int_value(payload.get("size"))
+                track.title = str(payload.get("title", "")).strip() or Path(track.original_name).stem
+                track.artist = str(payload.get("artist", "")).strip()
+                track.album = str(payload.get("album", "")).strip()
+                track.rating = clamp_rating(payload.get("rating", 0))
+                track.source_kind = clean_source_kind
+                track.source_path = source_path
+                track.source_external_id = source_external_id
+                track.source_available = bool(payload.get("source_available", True))
+                track.duration_seconds = _float_value(payload.get("duration_seconds"))
+                track.genre = str(payload.get("genre", "")).strip()
+                track.album_artist = str(payload.get("album_artist", "")).strip()
+                track.play_count = _int_value(payload.get("play_count"))
+                track.last_played_at = str(payload.get("last_played_at", "")).strip()
+                track.updated_at = now
+                seen_track_ids.add(track.id)
+
+            marked_unavailable = 0
+            if mark_missing_unavailable:
+                for track in library.tracks:
+                    if track.source_kind != clean_source_kind or track.id in seen_track_ids:
+                        continue
+                    if track.source_available:
+                        marked_unavailable += 1
+                    track.source_available = False
+                    track.updated_at = now
+
+            if created or updated or marked_unavailable:
+                library.updated_at = now
+                self._write_library(library)
+
+            return {
+                "created": created,
+                "updated": updated,
+                "skipped": skipped,
+                "marked_unavailable": marked_unavailable,
+                "total": created + updated,
+            }
+
+    def mark_linked_tracks_unavailable_except(
+        self,
+        library_id: str,
+        *,
+        source_kind: str,
+        source_external_ids: set[str],
+    ) -> int:
+        clean_source_kind = source_kind.strip().lower()
+        with self._lock:
+            library = self.get_library(library_id)
+            now = _now()
+            marked_unavailable = 0
+            for track in library.tracks:
+                if track.source_kind != clean_source_kind:
+                    continue
+                if track.source_external_id in source_external_ids:
+                    continue
+                if track.source_available:
+                    marked_unavailable += 1
+                track.source_available = False
+                track.updated_at = now
+
+            if marked_unavailable:
+                library.updated_at = now
+                self._write_library(library)
+            return marked_unavailable
+
+    def sync_linked_collections(self, library_id: str, *, source_kind: str, collections: list[dict]) -> dict:
+        clean_source_kind = source_kind.strip().lower()
+        if not clean_source_kind or clean_source_kind == "manual":
+            raise ValueError("A non-manual source kind is required.")
+
+        with self._lock:
+            library = self.get_library(library_id)
+            now = _now()
+            track_id_by_external_id = {
+                track.source_external_id: track.id
+                for track in library.tracks
+                if track.source_external_id
+            }
+            track_id_by_source_path = {
+                track.source_path.casefold(): track.id
+                for track in library.tracks
+                if track.source_path
+            }
+            existing_by_key = {
+                collection.source_external_id: collection
+                for collection in library.collections
+                if collection.source_kind == clean_source_kind and collection.source_external_id
+            }
+            seen_keys: set[str] = set()
+            created = 0
+            updated = 0
+            skipped = 0
+
+            for payload in collections:
+                name = str(payload.get("name", "")).strip()
+                source_external_id = str(payload.get("source_external_id", "")).strip() or name
+                if not name or not source_external_id:
+                    skipped += 1
+                    continue
+
+                track_ids: list[str] = []
+                for external_id in payload.get("track_source_external_ids", []):
+                    track_id = track_id_by_external_id.get(str(external_id).strip())
+                    if track_id and track_id not in track_ids:
+                        track_ids.append(track_id)
+                for source_path in payload.get("track_source_paths", []):
+                    track_id = track_id_by_source_path.get(str(source_path).strip().casefold())
+                    if track_id and track_id not in track_ids:
+                        track_ids.append(track_id)
+
+                if not track_ids:
+                    skipped += 1
+                    continue
+
+                collection = existing_by_key.get(source_external_id)
+                if collection is None:
+                    collection = Collection(
+                        id=str(uuid.uuid4()),
+                        name=name,
+                        track_ids=track_ids,
+                        created_at=now,
+                        updated_at=now,
+                        source_kind=clean_source_kind,
+                        source_external_id=source_external_id,
+                    )
+                    library.collections.append(collection)
+                    created += 1
+                else:
+                    collection.name = name
+                    collection.track_ids = track_ids
+                    collection.updated_at = now
+                    updated += 1
+
+                collection.source_kind = clean_source_kind
+                collection.source_external_id = source_external_id
+                seen_keys.add(source_external_id)
+
+            before_count = len(library.collections)
+            library.collections = [
+                collection
+                for collection in library.collections
+                if collection.source_kind != clean_source_kind or collection.source_external_id in seen_keys
+            ]
+            removed = before_count - len(library.collections)
+
+            if created or updated or removed:
+                library.updated_at = now
+                self._write_library(library)
+
+            return {
+                "created": created,
+                "updated": updated,
+                "removed": removed,
+                "skipped": skipped,
+                "total": created + updated,
+            }
+
     def update_track(
         self,
         library_id: str,
@@ -327,6 +573,7 @@ class Store:
         artist: str,
         album: str,
         rating: int | str = 0,
+        write_file_tags: bool = True,
     ) -> Track:
         with self._lock:
             library = self.get_library(library_id)
@@ -335,30 +582,39 @@ class Store:
             track.artist = artist.strip()
             track.album = album.strip()
             track.rating = clamp_rating(rating)
-            write_mp3_metadata(
-                self.library_files_dir(library_id) / track.stored_name,
-                title=track.title,
-                artist=track.artist,
-                album=track.album,
-                rating=track.rating,
-            )
+            if write_file_tags and track.source_kind == "uploaded":
+                write_mp3_metadata(
+                    self.library_files_dir(library_id) / track.stored_name,
+                    title=track.title,
+                    artist=track.artist,
+                    album=track.album,
+                    rating=track.rating,
+                )
             track.updated_at = _now()
             library.updated_at = track.updated_at
             self._write_library(library)
             return track
 
-    def set_track_rating(self, library_id: str, track_id: str, *, rating: int | str) -> Track:
+    def set_track_rating(
+        self,
+        library_id: str,
+        track_id: str,
+        *,
+        rating: int | str,
+        write_file_tags: bool = True,
+    ) -> Track:
         with self._lock:
             library = self.get_library(library_id)
             track = self._find_track(library, track_id)
             track.rating = clamp_rating(rating)
-            write_mp3_metadata(
-                self.library_files_dir(library_id) / track.stored_name,
-                title=track.title,
-                artist=track.artist,
-                album=track.album,
-                rating=track.rating,
-            )
+            if write_file_tags and track.source_kind == "uploaded":
+                write_mp3_metadata(
+                    self.library_files_dir(library_id) / track.stored_name,
+                    title=track.title,
+                    artist=track.artist,
+                    album=track.album,
+                    rating=track.rating,
+                )
             track.updated_at = _now()
             library.updated_at = track.updated_at
             self._write_library(library)
@@ -426,9 +682,10 @@ class Store:
             self._write_library(library)
 
             for track in tracks_to_remove:
-                file_path = self.library_files_dir(library_id) / track.stored_name
-                if file_path.exists():
-                    _unlink_with_retries(file_path)
+                if track.source_kind == "uploaded":
+                    file_path = self.library_files_dir(library_id) / track.stored_name
+                    if file_path.exists():
+                        _unlink_with_retries(file_path)
                 if track.cover_art_name:
                     cover_path = self.library_covers_dir(library_id) / track.cover_art_name
                     if cover_path.exists():
@@ -439,7 +696,10 @@ class Store:
     def get_track_file(self, library_id: str, track_id: str) -> tuple[Track, Path]:
         library = self.get_library(library_id)
         track = self._find_track(library, track_id)
-        file_path = self.library_files_dir(library_id) / track.stored_name
+        if track.source_kind == "uploaded":
+            file_path = self.library_files_dir(library_id) / track.stored_name
+        else:
+            file_path = Path(track.source_path).expanduser()
         if not file_path.exists():
             raise TrackNotFoundError(track_id)
         return track, file_path
@@ -549,6 +809,20 @@ def _unique_strings(values: list[str]) -> list[str]:
         seen.add(text)
         unique.append(text)
     return unique
+
+
+def _int_value(value) -> int:
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _float_value(value) -> float:
+    try:
+        return max(0.0, float(value or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _unlink_with_retries(path: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:

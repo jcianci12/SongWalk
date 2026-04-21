@@ -50,9 +50,68 @@
             <span>Keep <code>{{ owner_path }}</code> private. It grants library management access.</span>
           </div>
 
+          {% if notice %}
+            <div class="flash notice">{{ notice }}</div>
+          {% endif %}
+          {% if error %}
+            <div class="flash error">{{ error }}</div>
+          {% endif %}
+
           {% if local_access_mode %}
             <div class="owner-dashboard-panel">
               {% include '_quick_tunnel_panel.html' %}
+            </div>
+
+            <div class="owner-dashboard-panel">
+              <section class="quick-tunnel-panel">
+                <div class="quick-tunnel-copy">
+                  <p class="dock-label">Windows Media Player</p>
+                  <h2>Mirror WMP library</h2>
+                  <p>
+                    Read the Windows Media Player library from this PC, then expose it through a SongWalk library.
+                    The PC must stay online for remote playback.
+                  </p>
+                  <div class="quick-tunnel-status">
+                    <span>Status:</span>
+                    <strong>{{ wmp.message }}</strong>
+                  </div>
+                  <div class="quick-tunnel-status">
+                    <span>Access:</span>
+                    <strong>{{ wmp.access_rights or 'Unavailable' }}</strong>
+                  </div>
+                  <div class="quick-tunnel-status">
+                    <span>WMP items:</span>
+                    <strong>{{ wmp.item_count }}</strong>
+                  </div>
+                  {% if wmp.library_url %}
+                    <div class="quick-tunnel-status">
+                      <span>Mirrored:</span>
+                      <strong>{{ wmp.track_count }} tracks, {{ wmp.playlist_count }} playlists</strong>
+                    </div>
+                  {% endif %}
+                </div>
+                <div class="quick-tunnel-actions">
+                  {% if wmp.library_url %}
+                    <a class="frame-button" href="{{ wmp.library_url }}">Open WMP library</a>
+                  {% endif %}
+                  <form action="{{ url_for('sync_wmp_library', owner_token=owner_token) }}" method="post" data-wmp-sync-form>
+                    <button type="submit" class="frame-button primary" {% if not wmp.available %}disabled{% endif %}>
+                      Sync Windows Media Player
+                    </button>
+                  </form>
+                  <div class="title-upload-status wmp-sync-status" data-wmp-sync-shell hidden>
+                    <p class="status-line title-upload-copy" data-wmp-sync-phase>Waiting for Windows Media Player sync...</p>
+                    <p class="status-line" data-wmp-sync-current>Current file will appear here.</p>
+                    <a class="row-link" data-wmp-sync-library-link hidden href="#">Open syncing library</a>
+                    <div class="upload-progress title-upload-progress" data-wmp-sync-progress hidden>
+                      <div class="upload-progress-track">
+                        <div class="upload-progress-bar" data-wmp-sync-bar></div>
+                      </div>
+                      <span class="upload-progress-copy" data-wmp-sync-copy>Working...</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
           {% endif %}
 
@@ -72,6 +131,9 @@
                     <div class="library-row-main">
                       <div class="library-label-stack">
                         <a class="library-link" href="{{ library.browse_url }}">{{ library.display_name }}</a>
+                        {% if library.source_kind == 'wmp' %}
+                          <span class="local-access-badge" title="Windows Media Player source">WMP</span>
+                        {% endif %}
                         <code class="library-id-note">{{ library.id }}</code>
                       </div>
                       <form action="{{ library.rename_url }}" method="post" class="library-rename-form">

@@ -79,6 +79,12 @@ For YouTube and Spotify imports in a plain Python install, make sure `ffmpeg` is
 
 For a local desktop executable, use the PyInstaller build path documented in [docs/desktop-packaging.md](docs/desktop-packaging.md).
 
+To rebuild the Windows executable automatically while editing:
+
+```powershell
+.\build\pyinstaller\watch-windows.ps1
+```
+
 The packaged Windows app now runs as a tray app:
 
 - turns Quick Tunnel on by default in the packaged desktop runtime unless you explicitly set `SONGSHARE_QUICK_TUNNEL_ENABLED=0`

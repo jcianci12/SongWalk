@@ -125,6 +125,157 @@ class StoreTestCase(unittest.TestCase):
         loaded = store.get_library(library.id)
         self.assertEqual(loaded.collections, [])
 
+    def test_sync_linked_tracks_upserts_without_copying_or_deleting_source(self) -> None:
+        temp_dir = new_test_dir()
+        source_dir = temp_dir / "external"
+        source_dir.mkdir()
+        source_file = source_dir / "demo.mp3"
+        source_file.write_bytes(b"external-audio")
+        store = Store(temp_dir / "store")
+        library = store.create_library(name="Windows Media Player")
+
+        first = store.sync_linked_tracks(
+            library.id,
+            source_kind="wmp",
+            tracks=[
+                {
+                    "source_path": str(source_file),
+                    "source_external_id": "wmp-1",
+                    "original_name": "demo.mp3",
+                    "content_type": "audio/mpeg",
+                    "size": source_file.stat().st_size,
+                    "title": "Demo",
+                    "artist": "Artist",
+                    "album": "Album",
+                    "rating": 4,
+                }
+            ],
+        )
+        self.assertEqual(first["created"], 1)
+        self.assertEqual(first["updated"], 0)
+
+        loaded = store.get_library(library.id)
+        self.assertEqual(len(loaded.tracks), 1)
+        self.assertEqual(loaded.tracks[0].source_kind, "wmp")
+        self.assertEqual(loaded.tracks[0].source_path, str(source_file))
+
+        second = store.sync_linked_tracks(
+            library.id,
+            source_kind="wmp",
+            tracks=[
+                {
+                    "source_path": str(source_file),
+                    "source_external_id": "wmp-1",
+                    "original_name": "demo.mp3",
+                    "content_type": "audio/mpeg",
+                    "size": source_file.stat().st_size,
+                    "title": "Demo Updated",
+                    "artist": "Artist",
+                    "album": "Album",
+                    "rating": 5,
+                }
+            ],
+        )
+        self.assertEqual(second["created"], 0)
+        self.assertEqual(second["updated"], 1)
+        loaded = store.get_library(library.id)
+        self.assertEqual(len(loaded.tracks), 1)
+        self.assertEqual(loaded.tracks[0].title, "Demo Updated")
+
+        track, file_path = store.get_track_file(library.id, loaded.tracks[0].id)
+        self.assertEqual(track.source_kind, "wmp")
+        self.assertEqual(file_path, source_file)
+
+        store.delete_track(library.id, loaded.tracks[0].id)
+        self.assertTrue(source_file.exists())
+
+    def test_chunked_linked_sync_marks_missing_only_after_final_pass(self) -> None:
+        temp_dir = new_test_dir()
+        store = Store(temp_dir)
+        library = store.create_library(name="Windows Media Player")
+
+        store.sync_linked_tracks(
+            library.id,
+            source_kind="wmp",
+            tracks=[
+                {"source_path": str(temp_dir / "one.mp3"), "source_external_id": "one", "title": "One"},
+                {"source_path": str(temp_dir / "two.mp3"), "source_external_id": "two", "title": "Two"},
+            ],
+        )
+
+        store.sync_linked_tracks(
+            library.id,
+            source_kind="wmp",
+            tracks=[
+                {"source_path": str(temp_dir / "one.mp3"), "source_external_id": "one", "title": "One updated"},
+            ],
+            mark_missing_unavailable=False,
+        )
+        after_chunk = store.get_library(library.id)
+        self.assertTrue(next(track for track in after_chunk.tracks if track.source_external_id == "two").source_available)
+
+        marked = store.mark_linked_tracks_unavailable_except(
+            library.id,
+            source_kind="wmp",
+            source_external_ids={"one"},
+        )
+        self.assertEqual(marked, 1)
+        after_final = store.get_library(library.id)
+        self.assertTrue(next(track for track in after_final.tracks if track.source_external_id == "one").source_available)
+        self.assertFalse(next(track for track in after_final.tracks if track.source_external_id == "two").source_available)
+
+    def test_sync_linked_collections_maps_external_track_ids_and_removes_missing(self) -> None:
+        temp_dir = new_test_dir()
+        store = Store(temp_dir)
+        library = store.create_library(name="Windows Media Player")
+        store.sync_linked_tracks(
+            library.id,
+            source_kind="wmp",
+            tracks=[
+                {"source_path": str(temp_dir / "one.mp3"), "source_external_id": "one", "title": "One"},
+                {"source_path": str(temp_dir / "two.mp3"), "source_external_id": "two", "title": "Two"},
+            ],
+        )
+
+        first = store.sync_linked_collections(
+            library.id,
+            source_kind="wmp_playlist",
+            collections=[
+                {
+                    "name": "Favorites",
+                    "source_external_id": "playlist-one",
+                    "track_source_external_ids": ["one", "two"],
+                }
+            ],
+        )
+        self.assertEqual(first["created"], 1)
+        loaded = store.get_library(library.id)
+        self.assertEqual(len(loaded.collections), 1)
+        self.assertEqual(loaded.collections[0].name, "Favorites")
+        self.assertEqual(loaded.collections[0].source_kind, "wmp_playlist")
+        self.assertEqual(len(loaded.collections[0].track_ids), 2)
+
+        second = store.sync_linked_collections(
+            library.id,
+            source_kind="wmp_playlist",
+            collections=[
+                {
+                    "name": "Favorites renamed",
+                    "source_external_id": "playlist-one",
+                    "track_source_external_ids": ["one"],
+                }
+            ],
+        )
+        self.assertEqual(second["updated"], 1)
+        loaded = store.get_library(library.id)
+        self.assertEqual(len(loaded.collections), 1)
+        self.assertEqual(loaded.collections[0].name, "Favorites renamed")
+        self.assertEqual(len(loaded.collections[0].track_ids), 1)
+
+        empty = store.sync_linked_collections(library.id, source_kind="wmp_playlist", collections=[])
+        self.assertEqual(empty["removed"], 1)
+        self.assertEqual(store.get_library(library.id).collections, [])
+
 
 if __name__ == "__main__":
     unittest.main()

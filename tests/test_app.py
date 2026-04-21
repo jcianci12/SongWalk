@@ -11,6 +11,7 @@ from songshare.album_lookup import LookupCandidate
 from songshare import create_app
 from songshare.importer import ImportOutcome
 from songshare.quick_tunnel import QuickTunnelStatus
+from songshare.wmp_library import WMP_LIBRARY_NAME, WMP_PLAYLIST_SOURCE_KIND, WMP_SOURCE_KIND, WmpStatus, WmpSyncResult
 
 
 def _resolve_test_tmp_root() -> Path:
@@ -146,6 +147,144 @@ class FakeQuickTunnelManager:
         return self.status()
 
 
+class FakeWmpService:
+    def __init__(self, source_path: Path | None = None):
+        self.source_path = source_path
+        self.sync_calls = 0
+        self.rating_calls: list[tuple[str, str, int]] = []
+        self.metadata_calls: list[tuple[str, str, str, str, str]] = []
+        self.progress_events: list[dict] = []
+
+    def status(self):
+        return WmpStatus(
+            available=True,
+            platform="win32",
+            access_rights="full",
+            item_count=1 if self.source_path else 0,
+            message="Windows Media Player is available.",
+        )
+
+    def sync_to_store(
+        self,
+        store,
+        *,
+        library_id: str | None = None,
+        limit: int | None = None,
+        progress_callback=None,
+    ):
+        self.sync_calls += 1
+        if progress_callback:
+            progress_callback(
+                type(
+                    "Progress",
+                    (),
+                    {
+                        "phase": "scanning",
+                        "message": "Scanning Windows Media Player library...",
+                        "percent": 0,
+                        "current_item": "",
+                    },
+                )()
+            )
+        library = None
+        if library_id:
+            library = store.get_library(library_id)
+        else:
+            for candidate in store.list_libraries():
+                if candidate.name == WMP_LIBRARY_NAME:
+                    library = candidate
+                    break
+            if library is None:
+                library = store.create_library(name=WMP_LIBRARY_NAME)
+
+        tracks = []
+        if self.source_path:
+            if progress_callback:
+                progress_callback(
+                    type(
+                        "Progress",
+                        (),
+                        {
+                            "phase": "syncing_tracks",
+                            "message": "Syncing track 1 of 1...",
+                            "percent": 50,
+                            "current_item": "WMP Demo",
+                        },
+                    )()
+                )
+            time.sleep(0.15)
+            tracks.append(
+                {
+                    "source_path": str(self.source_path),
+                    "source_external_id": "wmp-track-1",
+                    "original_name": self.source_path.name,
+                    "content_type": "audio/mpeg",
+                    "size": self.source_path.stat().st_size,
+                    "title": "WMP Demo",
+                    "artist": "WMP Artist",
+                    "album": "WMP Album",
+                    "rating": 3,
+                    "duration_seconds": 123.0,
+                    "genre": "Demo",
+                    "album_artist": "WMP Album Artist",
+                    "play_count": 7,
+                    "last_played_at": "2026-04-16",
+                    "source_available": True,
+                }
+            )
+        stats = store.sync_linked_tracks(library.id, source_kind=WMP_SOURCE_KIND, tracks=tracks)
+        playlist_stats = {"total": 0}
+        if tracks:
+            playlist_stats = store.sync_linked_collections(
+                library.id,
+                source_kind=WMP_PLAYLIST_SOURCE_KIND,
+                collections=[
+                    {
+                        "name": "WMP Favorites",
+                        "source_external_id": "playlist-1",
+                        "track_source_external_ids": ["wmp-track-1"],
+                    }
+                ],
+            )
+        if progress_callback:
+            progress_callback(
+                type(
+                    "Progress",
+                    (),
+                    {
+                        "phase": "complete",
+                        "message": "Windows Media Player sync finished.",
+                        "percent": 100,
+                        "current_item": "",
+                    },
+                )()
+            )
+        return WmpSyncResult(
+            ok=True,
+            library_id=library.id,
+            created=stats["created"],
+            updated=stats["updated"],
+            skipped=stats["skipped"],
+            marked_unavailable=stats["marked_unavailable"],
+            total=stats["total"],
+            message=f"Synced {stats['total']} WMP track and {playlist_stats['total']} playlist.",
+        )
+
+    def set_rating(self, *, source_external_id: str, source_path: str, rating: int | str) -> None:
+        self.rating_calls.append((source_external_id, source_path, int(rating)))
+
+    def update_metadata(
+        self,
+        *,
+        source_external_id: str,
+        source_path: str,
+        title: str,
+        artist: str,
+        album: str,
+    ) -> None:
+        self.metadata_calls.append((source_external_id, source_path, title, artist, album))
+
+
 def _uploaded_track(filename: str):
     from songshare.store import UploadedTrack
 
@@ -158,6 +297,21 @@ def _uploaded_track(filename: str):
 
 def wait_for_import_job(client, status_url: str) -> dict:
     deadline = time.time() + 2
+    last_payload = {}
+    while time.time() < deadline:
+        response = client.get(
+            status_url,
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        last_payload = response.get_json()
+        if last_payload["job"]["complete"]:
+            return last_payload
+        time.sleep(0.05)
+    return last_payload
+
+
+def wait_for_wmp_sync_job(client, status_url: str) -> dict:
+    deadline = time.time() + 3
     last_payload = {}
     while time.time() < deadline:
         response = client.get(
@@ -187,6 +341,57 @@ class SongshareAppTestCase(unittest.TestCase):
 
     def create_library(self):
         return self.client.post(f"/libraries?owner_token={self.owner_token}", follow_redirects=False)
+
+    def create_wmp_playlist_fixture(self):
+        source_dir = self.temp_dir / "wmp-source"
+        source_dir.mkdir()
+        first_source = source_dir / "road-runner.mp3"
+        second_source = source_dir / "rain-pulse.mp3"
+        first_source.write_bytes(b"WMP-road-runner-bytes")
+        second_source.write_bytes(b"WMP-rain-pulse-bytes")
+
+        store = self.app.config["STORE"]
+        library = store.create_library(name=WMP_LIBRARY_NAME)
+        store.sync_linked_tracks(
+            library.id,
+            source_kind=WMP_SOURCE_KIND,
+            tracks=[
+                {
+                    "source_path": str(first_source),
+                    "source_external_id": "wmp-road",
+                    "original_name": first_source.name,
+                    "content_type": "audio/mpeg",
+                    "size": first_source.stat().st_size,
+                    "title": "Road Runner",
+                    "artist": "Coyote Choir",
+                    "album": "Desert Tapes",
+                    "source_available": True,
+                },
+                {
+                    "source_path": str(second_source),
+                    "source_external_id": "wmp-rain",
+                    "original_name": second_source.name,
+                    "content_type": "audio/mpeg",
+                    "size": second_source.stat().st_size,
+                    "title": "Rain Pulse",
+                    "artist": "Harbor Line",
+                    "album": "Storm Record",
+                    "source_available": True,
+                },
+            ],
+        )
+        store.sync_linked_collections(
+            library.id,
+            source_kind=WMP_PLAYLIST_SOURCE_KIND,
+            collections=[
+                {
+                    "name": "Evening Drive",
+                    "source_external_id": "playlist-evening-drive",
+                    "track_source_external_ids": ["wmp-road"],
+                }
+            ],
+        )
+        return store.get_library(library.id)
 
     def tearDown(self) -> None:
         pass
@@ -1019,6 +1224,234 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertEqual(manager.start_calls, 1)
         self.assertTrue(payload["tunnel"]["running"])
         self.assertEqual(payload["tunnel"]["public_url"], "https://started-1.trycloudflare.com")
+
+    def test_owner_dashboard_renders_wmp_sync_panel_for_local_access(self) -> None:
+        self.app.config["WMP_SERVICE"] = FakeWmpService()
+
+        page = self.client.get(f"/owner/{self.owner_token}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Mirror WMP library", page.data)
+        self.assertIn(b"Sync Windows Media Player", page.data)
+        self.assertIn(b"Windows Media Player is available.", page.data)
+        self.assertIn(b"data-wmp-sync-shell", page.data)
+        self.assertIn(b"data-wmp-sync-bar", page.data)
+        self.assertIn(b"data-wmp-sync-current", page.data)
+        self.assertIn(b"data-wmp-sync-library-link", page.data)
+
+    def test_wmp_sync_json_starts_background_job_and_exposes_progress(self) -> None:
+        source_dir = self.temp_dir / "wmp-source"
+        source_dir.mkdir()
+        source_file = source_dir / "demo.mp3"
+        source_file.write_bytes(b"WMP-source-bytes")
+        self.app.config["WMP_SERVICE"] = FakeWmpService(source_file)
+
+        response = self.client.post(
+            f"/owner/{self.owner_token}/wmp/sync",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 202)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("status_url", payload)
+        self.assertIn("/s/", payload["wmp"]["library_url"])
+
+        status_payload = wait_for_wmp_sync_job(self.client, payload["status_url"])
+        self.assertTrue(status_payload["job"]["ok"])
+        self.assertEqual(status_payload["job"]["percent"], 100)
+        self.assertEqual(status_payload["job"]["current_item"], "")
+        self.assertIn("Synced 1 WMP track", status_payload["job"]["message"])
+
+        libraries = self.app.config["STORE"].list_libraries()
+        wmp_library = next(library for library in libraries if library.name == WMP_LIBRARY_NAME)
+        self.assertEqual(len(wmp_library.tracks), 1)
+        self.assertEqual(wmp_library.tracks[0].title, "WMP Demo")
+        self.assertEqual(payload["wmp"]["library_id"], wmp_library.id)
+
+        state_response = self.client.get(f"/s/{wmp_library.id}/state")
+        self.assertEqual(state_response.status_code, 200)
+        state_payload = state_response.get_json()
+        self.assertTrue(state_payload["ok"])
+        self.assertEqual(state_payload["library"]["track_count"], 1)
+        self.assertTrue(state_payload["library"]["is_wmp_library"])
+        self.assertNotIn("owner_token", state_payload.get("wmp_sync") or {})
+
+    def test_wmp_sync_creates_mirrored_library_and_streams_source_file(self) -> None:
+        source_dir = self.temp_dir / "wmp-source"
+        source_dir.mkdir()
+        source_file = source_dir / "demo.mp3"
+        source_file.write_bytes(b"WMP-source-bytes")
+        self.app.config["WMP_SERVICE"] = FakeWmpService(source_file)
+
+        response = self.client.post(f"/owner/{self.owner_token}/wmp/sync", follow_redirects=False)
+        self.assertEqual(response.status_code, 302)
+
+        libraries = self.app.config["STORE"].list_libraries()
+        wmp_library = next(library for library in libraries if library.name == WMP_LIBRARY_NAME)
+        self.assertEqual(len(wmp_library.tracks), 1)
+        track = wmp_library.tracks[0]
+        self.assertEqual(track.source_kind, WMP_SOURCE_KIND)
+        self.assertEqual(track.source_path, str(source_file))
+        self.assertEqual(track.title, "WMP Demo")
+        self.assertEqual(len(wmp_library.collections), 1)
+        self.assertEqual(wmp_library.collections[0].name, "WMP Favorites")
+        self.assertEqual(wmp_library.collections[0].source_kind, WMP_PLAYLIST_SOURCE_KIND)
+
+        library_page = self.client.get(f"/s/{wmp_library.id}?view=albums")
+        self.assertEqual(library_page.status_code, 200)
+        self.assertIn(b"WMP Favorites", library_page.data)
+        self.assertIn(b"Playlist", library_page.data)
+
+        stream_response = self.client.get(f"/s/{wmp_library.id}/tracks/{track.id}/file")
+        self.assertEqual(stream_response.status_code, 200)
+        self.assertEqual(stream_response.data, b"WMP-source-bytes")
+        stream_response.close()
+
+    def test_wmp_sync_json_endpoint_exposes_job_progress(self) -> None:
+        source_dir = self.temp_dir / "wmp-source"
+        source_dir.mkdir()
+        source_file = source_dir / "demo.mp3"
+        source_file.write_bytes(b"WMP-source-bytes")
+        self.app.config["WMP_SERVICE"] = FakeWmpService(source_file)
+
+        response = self.client.post(
+            f"/owner/{self.owner_token}/wmp/sync",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 202)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("id", payload["job"])
+        self.assertIn("/wmp/sync/", payload["status_url"])
+
+        deadline = time.time() + 2
+        observed_current_item = ""
+        while time.time() < deadline:
+            status_response = self.client.get(
+                payload["status_url"],
+                headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+            )
+            status_payload = status_response.get_json()
+            observed_current_item = status_payload["job"]["current_item"]
+            if observed_current_item:
+                break
+            time.sleep(0.05)
+
+        self.assertTrue(observed_current_item)
+        self.assertIn("WMP", observed_current_item)
+
+        status_payload = wait_for_import_job(self.client, payload["status_url"])
+        self.assertTrue(status_payload["job"]["ok"])
+
+    def test_wmp_library_page_exposes_state_polling_metadata(self) -> None:
+        wmp_library = self.create_wmp_playlist_fixture()
+
+        page = self.client.get(f"/s/{wmp_library.id}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(f'data-library-state-url="/s/{wmp_library.id}/state"'.encode(), page.data)
+        self.assertIn(b'data-wmp-library="1"', page.data)
+        self.assertIn(b"data-library-live-region", page.data)
+        self.assertIn(b"data-library-live-sync", page.data)
+
+    def test_library_state_reports_active_wmp_sync_job_for_incremental_refresh(self) -> None:
+        source_dir = self.temp_dir / "wmp-source"
+        source_dir.mkdir()
+        source_file = source_dir / "demo.mp3"
+        source_file.write_bytes(b"WMP-source-bytes")
+        self.app.config["WMP_SERVICE"] = FakeWmpService(source_file)
+
+        response = self.client.post(
+            f"/owner/{self.owner_token}/wmp/sync",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 202)
+        payload = response.get_json()
+        library_id = payload["wmp"]["library_id"]
+
+        state_response = self.client.get(f"/s/{library_id}/state")
+        self.assertEqual(state_response.status_code, 200)
+        state_payload = state_response.get_json()
+        self.assertTrue(state_payload["ok"])
+        self.assertEqual(state_payload["library"]["id"], library_id)
+        self.assertTrue(state_payload["library"]["is_wmp_library"])
+        self.assertIsNotNone(state_payload["wmp_sync"])
+        self.assertEqual(state_payload["wmp_sync"]["library_id"], library_id)
+        self.assertNotIn("owner_token", state_payload["wmp_sync"])
+
+        final_payload = wait_for_wmp_sync_job(self.client, payload["status_url"])
+        self.assertTrue(final_payload["job"]["ok"])
+
+    def test_wmp_playlist_views_render_searchable_playable_rows(self) -> None:
+        wmp_library = self.create_wmp_playlist_fixture()
+        first_track = next(track for track in wmp_library.tracks if track.source_external_id == "wmp-road")
+
+        tracks_page = self.client.get(f"/s/{wmp_library.id}?view=tracks")
+        self.assertEqual(tracks_page.status_code, 200)
+        self.assertIn(b"Evening Drive", tracks_page.data)
+        self.assertIn(b"Playlist", tracks_page.data)
+        self.assertIn(b"data-collection-track-section", tracks_page.data)
+        self.assertIn(b'data-collection-name-search="evening drive"', tracks_page.data)
+        self.assertIn(b"Road Runner", tracks_page.data)
+        self.assertIn(b"Rain Pulse", tracks_page.data)
+        self.assertIn(b'data-track-source-kind="wmp"', tracks_page.data)
+        self.assertIn(b'data-track-source-available="1"', tracks_page.data)
+        self.assertIn(
+            f'data-track-src="/s/{wmp_library.id}/tracks/{first_track.id}/file"'.encode(),
+            tracks_page.data,
+        )
+
+        albums_page = self.client.get(f"/s/{wmp_library.id}?view=albums")
+        self.assertEqual(albums_page.status_code, 200)
+        self.assertEqual(albums_page.data.count(b"data-collection-card"), 1)
+        self.assertIn(b"Evening Drive", albums_page.data)
+        self.assertIn(b"Playlist", albums_page.data)
+        self.assertIn(b"data-collection-album-link", albums_page.data)
+        self.assertIn(b"Desert Tapes", albums_page.data)
+        self.assertIn(b"Storm Record", albums_page.data)
+        self.assertIn(b'data-search="evening drive', albums_page.data)
+
+    def test_wmp_track_stream_supports_range_requests_for_audio_playback(self) -> None:
+        wmp_library = self.create_wmp_playlist_fixture()
+        track = next(track for track in wmp_library.tracks if track.source_external_id == "wmp-road")
+
+        stream_response = self.client.get(
+            f"/s/{wmp_library.id}/tracks/{track.id}/file",
+            headers={"Range": "bytes=0-2"},
+        )
+        self.assertEqual(stream_response.status_code, 206)
+        self.assertEqual(stream_response.data, b"WMP")
+        self.assertIn("bytes 0-2/", stream_response.headers["Content-Range"])
+        stream_response.close()
+
+    def test_wmp_rating_endpoint_writes_to_wmp_before_updating_mirror(self) -> None:
+        source_dir = self.temp_dir / "wmp-source"
+        source_dir.mkdir()
+        source_file = source_dir / "demo.mp3"
+        source_file.write_bytes(b"WMP-source-bytes")
+        service = FakeWmpService(source_file)
+        self.app.config["WMP_SERVICE"] = service
+
+        self.client.post(f"/owner/{self.owner_token}/wmp/sync", follow_redirects=False)
+        wmp_library = next(library for library in self.app.config["STORE"].list_libraries() if library.name == WMP_LIBRARY_NAME)
+        track = wmp_library.tracks[0]
+
+        response = self.client.post(
+            f"/s/{wmp_library.id}/tracks/{track.id}/rating",
+            json={"rating": 5},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(service.rating_calls, [("wmp-track-1", str(source_file), 5)])
+        updated = self.app.config["STORE"].get_track(wmp_library.id, track.id)
+        self.assertEqual(updated.rating, 5)
+
+    def test_wmp_sync_requires_direct_local_access(self) -> None:
+        self.app.config["WMP_SERVICE"] = FakeWmpService()
+
+        response = self.client.post(
+            f"/owner/{self.owner_token}/wmp/sync",
+            base_url="http://music.example.com",
+        )
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__ == "__main__":

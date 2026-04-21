@@ -19,6 +19,13 @@ from .album_lookup import LookupError, MusicMetadataClient
 from .importer import ImportError, ImportOutcome, ImportProgressUpdate, LibraryImportService
 from .quick_tunnel import QuickTunnelManager, QuickTunnelStatus
 from .store import CollectionNotFoundError, LibraryNotFoundError, Store, TrackNotFoundError, UploadedTrack
+from .wmp_library import (
+    DisabledWmpLibraryService,
+    WMP_LIBRARY_NAME,
+    WMP_SOURCE_KIND,
+    WmpLibraryService,
+    WmpSyncProgressUpdate,
+)
 
 
 @dataclass
@@ -110,6 +117,103 @@ class ImportJobStore:
             self._jobs.pop(job_id, None)
 
 
+@dataclass
+class WmpSyncJob:
+    id: str
+    owner_token: str
+    library_id: str = ""
+    status: str = "queued"
+    message: str = "Queued..."
+    percent: int | None = None
+    current_item: str = ""
+    complete: bool = False
+    ok: bool = False
+    error: str = ""
+    redirect_url: str = ""
+    updated_at: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "owner_token": self.owner_token,
+            "library_id": self.library_id,
+            "status": self.status,
+            "message": self.message,
+            "percent": self.percent,
+            "current_item": self.current_item,
+            "complete": self.complete,
+            "ok": self.ok,
+            "error": self.error,
+            "redirect_url": self.redirect_url,
+            "updated_at": self.updated_at,
+        }
+
+
+class WmpSyncJobStore:
+    def __init__(self, *, ttl_seconds: float = 3600):
+        self._ttl_seconds = ttl_seconds
+        self._jobs: dict[str, WmpSyncJob] = {}
+        self._lock = threading.Lock()
+
+    def create(self, *, owner_token: str, message: str, library_id: str = "") -> WmpSyncJob:
+        with self._lock:
+            self._prune_locked()
+            job = WmpSyncJob(
+                id=str(uuid4()),
+                owner_token=owner_token,
+                library_id=library_id,
+                message=message,
+                updated_at=time.time(),
+            )
+            self._jobs[job.id] = job
+            return job
+
+    def update(self, job_id: str, **changes) -> WmpSyncJob | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return None
+            for key, value in changes.items():
+                setattr(job, key, value)
+            job.updated_at = time.time()
+            return job
+
+    def finish(self, job_id: str, *, ok: bool, message: str, redirect_url: str = "", error: str = "") -> WmpSyncJob | None:
+        return self.update(
+            job_id,
+            status="complete" if ok else "error",
+            message=message,
+            percent=100 if ok else None,
+            complete=True,
+            ok=ok,
+            error=error,
+            redirect_url=redirect_url,
+        )
+
+    def get(self, job_id: str) -> WmpSyncJob | None:
+        with self._lock:
+            self._prune_locked()
+            return self._jobs.get(job_id)
+
+    def latest_for_library(self, library_id: str) -> WmpSyncJob | None:
+        with self._lock:
+            self._prune_locked()
+            matches = [job for job in self._jobs.values() if job.library_id == library_id]
+            if not matches:
+                return None
+            return max(matches, key=lambda job: job.updated_at)
+
+    def _prune_locked(self) -> None:
+        now = time.time()
+        expired = [
+            job_id
+            for job_id, job in self._jobs.items()
+            if job.complete and now - job.updated_at > self._ttl_seconds
+        ]
+        for job_id in expired:
+            self._jobs.pop(job_id, None)
+
+
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -150,6 +254,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.config["STORE"] = store
     app.config.setdefault("LOOKUP_CLIENT", MusicMetadataClient())
     app.config.setdefault("IMPORT_JOB_STORE", ImportJobStore())
+    app.config.setdefault("WMP_SYNC_JOB_STORE", WmpSyncJobStore())
     app.config.setdefault(
         "IMPORT_SERVICE",
         LibraryImportService(
@@ -160,6 +265,10 @@ def create_app(test_config: dict | None = None) -> Flask:
             spotify_client_id=os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "").strip() or None,
             spotify_client_secret=os.getenv("SONGSHARE_SPOTIFY_CLIENT_SECRET", "").strip() or None,
         ),
+    )
+    app.config.setdefault(
+        "WMP_SERVICE",
+        DisabledWmpLibraryService() if app.config.get("TESTING") else WmpLibraryService(),
     )
     owner_token_path = app.config["DATA_DIR"] / "owner-token.txt"
     owner_token = os.getenv("SONGSHARE_OWNER_TOKEN", "").strip()
@@ -279,11 +388,61 @@ def create_app(test_config: dict | None = None) -> Flask:
         payload["state_path"] = str(Path(app.config["DATA_DIR"]) / "quick-tunnel.json")
         return payload
 
+    def wmp_sync_job_store() -> WmpSyncJobStore:
+        return app.config["WMP_SYNC_JOB_STORE"]
+
+    def wmp_status() -> dict:
+        service = app.config.get("WMP_SERVICE")
+        if service is None or not hasattr(service, "status"):
+            payload = {
+                "available": False,
+                "platform": "",
+                "access_rights": "",
+                "item_count": 0,
+                "message": "Windows Media Player sync is not configured.",
+            }
+        else:
+            payload = service.status().to_dict()
+
+        library = find_wmp_library()
+        payload["library_url"] = url_for("view_library", library_id=library.id) if library else ""
+        payload["track_count"] = len(library.tracks) if library else 0
+        payload["playlist_count"] = len(library.collections) if library else 0
+        return payload
+
+    def wmp_sync_job_status(job_id: str) -> dict | None:
+        job_store = wmp_sync_job_store()
+        job = job_store.get(job_id)
+        return job.to_dict() if job else None
+
+    def public_wmp_sync_job_status_for_library(library_id: str) -> dict | None:
+        job = wmp_sync_job_store().latest_for_library(library_id)
+        if job is None:
+            return None
+        return {
+            "id": job.id,
+            "library_id": job.library_id,
+            "status": job.status,
+            "message": job.message,
+            "percent": job.percent,
+            "current_item": job.current_item,
+            "complete": job.complete,
+            "ok": job.ok,
+            "error": job.error,
+            "updated_at": job.updated_at,
+        }
+
     def require_owner_access() -> None:
         token = owner_token_from_request().strip()
         expected = app.config["OWNER_TOKEN"]
         if not token or not secrets.compare_digest(token, expected):
             abort(404)
+
+    def find_wmp_library():
+        for library in store.list_libraries():
+            if library.name.strip().casefold() == WMP_LIBRARY_NAME.casefold():
+                return library
+        return None
 
     def build_library_summaries() -> list[dict]:
         libraries = []
@@ -300,6 +459,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "delete_url": url_for("delete_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
                     "rename_url": url_for("rename_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
                     "files_dir": store.library_files_dir(library.id),
+                    "source_kind": WMP_SOURCE_KIND if library.name.strip().casefold() == WMP_LIBRARY_NAME.casefold() else "",
                 }
             )
         return libraries
@@ -326,6 +486,12 @@ def create_app(test_config: dict | None = None) -> Flask:
             "original_name": track.original_name,
             "size": track.size,
             "updated_at": track.updated_at,
+            "source_kind": track.source_kind,
+            "source_available": track.source_available,
+            "duration_seconds": track.duration_seconds,
+            "genre": track.genre,
+            "album_artist": track.album_artist,
+            "play_count": track.play_count,
             "cover_url": cover_url(library_id, track.cover_art_name) if track.cover_art_name else "",
             "cover_initials": cover_initials(track.album or track.title or track.original_name),
             "search_value": f"{title} {artist_name} {album_name} {track.original_name}".strip(),
@@ -403,7 +569,18 @@ def create_app(test_config: dict | None = None) -> Flask:
         collections: list[dict] = []
         for stored_collection in library.collections:
             selected_track_ids = set(stored_collection.track_ids)
-            albums = [group for group in album_groups if any(track_id in selected_track_ids for track_id in group["track_ids"])]
+            albums = []
+            for group in album_groups:
+                selected_tracks = [track for track in group["tracks"] if track["id"] in selected_track_ids]
+                if not selected_tracks:
+                    continue
+                album = dict(group)
+                album["tracks"] = selected_tracks
+                album["track_ids"] = [track["id"] for track in selected_tracks]
+                album["search_value"] = " ".join(
+                    [group["name"], group["artist"], *[track["search_value"] for track in selected_tracks]]
+                ).strip()
+                albums.append(album)
             if not albums:
                 continue
 
@@ -413,6 +590,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "id": stored_collection.id,
                     "key": f"collection::{stored_collection.id}",
                     "name": stored_collection.name,
+                    "source_kind": stored_collection.source_kind,
                     "artist": "",
                     "album_count": len(albums),
                     "track_count": sum(len(album["tracks"]) for album in albums),
@@ -545,6 +723,63 @@ def create_app(test_config: dict | None = None) -> Flask:
         ).start()
         return job
 
+    def start_wmp_sync_job(library_id: str) -> WmpSyncJob:
+        job_store: WmpSyncJobStore = app.config["WMP_SYNC_JOB_STORE"]
+        service = app.config["WMP_SERVICE"]
+        job = job_store.create(
+            owner_token=app.config["OWNER_TOKEN"],
+            library_id=library_id,
+            message="Queued Windows Media Player sync...",
+        )
+
+        def progress(update: WmpSyncProgressUpdate) -> None:
+            job_store.update(
+                job.id,
+                library_id=library_id,
+                status=update.phase,
+                message=update.message,
+                percent=update.percent,
+                current_item=update.current_item,
+            )
+
+        def worker() -> None:
+            try:
+                progress(
+                    WmpSyncProgressUpdate(
+                        phase="starting",
+                        message="Starting Windows Media Player sync...",
+                        percent=2,
+                    )
+                )
+                result = service.sync_to_store(store, library_id=library_id, progress_callback=progress)
+                if not result.ok:
+                    message = result.error or result.message or "Windows Media Player sync failed."
+                    job_store.finish(job.id, ok=False, message=message, error=message)
+                    return
+
+                with app.test_request_context():
+                    redirect_url = url_for(
+                        "view_library",
+                        library_id=result.library_id,
+                        notice=result.message or "Windows Media Player library synced.",
+                    )
+                job_store.finish(
+                    job.id,
+                    ok=True,
+                    message=result.message or "Windows Media Player library synced.",
+                    redirect_url=redirect_url,
+                )
+            except Exception as exc:
+                message = str(exc)
+                job_store.finish(job.id, ok=False, message=message, error=message)
+
+        threading.Thread(
+            target=worker,
+            name=f"songshare-wmp-sync-{job.id[:8]}",
+            daemon=True,
+        ).start()
+        return job
+
     @app.get("/")
     def home():
         return render_template(
@@ -566,7 +801,59 @@ def create_app(test_config: dict | None = None) -> Flask:
             owner_token=app.config["OWNER_TOKEN"],
             owner_path=owner_path(),
             quick_tunnel=quick_tunnel_status(),
+            wmp=wmp_status(),
+            notice=request.args.get("notice", ""),
+            error=request.args.get("error", ""),
         )
+
+    @app.post("/owner/<owner_token>/wmp/sync")
+    def sync_wmp_library(owner_token: str):
+        require_owner_access()
+        require_local_access()
+        service = app.config["WMP_SERVICE"]
+        library = find_wmp_library()
+        if library is None:
+            library = store.create_library(name=WMP_LIBRARY_NAME)
+
+        if wants_json():
+            job = start_wmp_sync_job(library.id)
+            library_url = url_for("view_library", library_id=library.id)
+            return (
+                jsonify(
+                    {
+                        "ok": True,
+                        "job": job.to_dict(),
+                        "status_url": url_for("view_wmp_sync_status", owner_token=app.config["OWNER_TOKEN"], job_id=job.id),
+                        "wmp": {
+                            "library_id": library.id,
+                            "library_url": library_url,
+                        },
+                    }
+                ),
+                202,
+            )
+
+        result = service.sync_to_store(store, library_id=library.id)
+
+        if result.ok:
+            return redirect(
+                url_for(
+                    "view_library",
+                    library_id=result.library_id,
+                    notice=result.message or "Windows Media Player library synced.",
+                )
+            )
+
+        return redirect(url_for("owner_home", owner_token=app.config["OWNER_TOKEN"], error=result.error or result.message))
+
+    @app.get("/owner/<owner_token>/wmp/sync/<job_id>")
+    def view_wmp_sync_status(owner_token: str, job_id: str):
+        require_owner_access()
+        require_local_access()
+        job = wmp_sync_job_status(job_id)
+        if job is None:
+            return jsonify({"ok": False, "error": "Windows Media Player sync job not found."}), 404
+        return jsonify({"ok": True, "job": job})
 
     @app.get("/quick-tunnel")
     def view_quick_tunnel_status():
@@ -716,6 +1003,30 @@ def create_app(test_config: dict | None = None) -> Flask:
             view_mode=view_mode,
             selected_album_key=selected_album_key,
             track_url=track_url,
+            is_wmp_library=library.name.strip().casefold() == WMP_LIBRARY_NAME.casefold(),
+        )
+
+    @app.get("/s/<library_id>/state")
+    def library_state(library_id: str):
+        try:
+            library = store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        job = public_wmp_sync_job_status_for_library(library.id)
+        return jsonify(
+            {
+                "ok": True,
+                "library": {
+                    "id": library.id,
+                    "track_count": len(library.tracks),
+                    "collection_count": len(library.collections),
+                    "updated_at": library.updated_at.isoformat(),
+                    "is_wmp_library": library.name.strip().casefold() == WMP_LIBRARY_NAME.casefold(),
+                },
+                "wmp_sync": job,
+                "wmp_sync_active": bool(job and not job["complete"]),
+            }
         )
 
     @app.get("/s/<library_id>/import")
@@ -749,8 +1060,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                 archive.writestr("README.txt", "SongWalk library is empty.\n")
 
             for track in library.tracks:
-                file_path = store.library_files_dir(library_id) / track.stored_name
-                if not file_path.exists():
+                try:
+                    _track, file_path = store.get_track_file(library_id, track.id)
+                except TrackNotFoundError:
                     continue
                 archive.write(file_path, arcname=archive_track_path(track, used_paths))
 
@@ -896,6 +1208,17 @@ def create_app(test_config: dict | None = None) -> Flask:
     @app.post("/s/<library_id>/tracks/<track_id>")
     def update_track(library_id: str, track_id: str):
         try:
+            track = store.get_track(library_id, track_id)
+            if track.source_kind == WMP_SOURCE_KIND:
+                service = app.config["WMP_SERVICE"]
+                service.update_metadata(
+                    source_external_id=track.source_external_id,
+                    source_path=track.source_path,
+                    title=request.form.get("title", ""),
+                    artist=request.form.get("artist", ""),
+                    album=request.form.get("album", ""),
+                )
+
             store.update_track(
                 library_id,
                 track_id,
@@ -903,9 +1226,14 @@ def create_app(test_config: dict | None = None) -> Flask:
                 artist=request.form.get("artist", ""),
                 album=request.form.get("album", ""),
                 rating=request.form.get("rating", "0"),
+                write_file_tags=track.source_kind == "uploaded",
             )
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
+        except Exception as exc:
+            if wants_json():
+                return jsonify({"ok": False, "error": f"Could not save to Windows Media Player: {exc}"}), 400
+            return redirect(url_for("view_library", library_id=library_id, error=f"Could not save to Windows Media Player: {exc}"))
 
         if wants_json():
             return jsonify({"ok": True})
@@ -930,9 +1258,24 @@ def create_app(test_config: dict | None = None) -> Flask:
         rating = payload.get("rating", request.form.get("rating", "0"))
 
         try:
-            track = store.set_track_rating(library_id, track_id, rating=rating)
+            track = store.get_track(library_id, track_id)
+            if track.source_kind == WMP_SOURCE_KIND:
+                service = app.config["WMP_SERVICE"]
+                service.set_rating(
+                    source_external_id=track.source_external_id,
+                    source_path=track.source_path,
+                    rating=rating,
+                )
+            track = store.set_track_rating(
+                library_id,
+                track_id,
+                rating=rating,
+                write_file_tags=track.source_kind == "uploaded",
+            )
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"Could not save to Windows Media Player: {exc}"}), 400
 
         return jsonify({"ok": True, "track": {"id": track.id, "rating": track.rating}})
 

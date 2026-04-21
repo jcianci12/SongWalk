@@ -367,6 +367,151 @@
     });
   });
 
+  function setWmpSyncStatus(form, { visible = false, phase = "", detail = "", percent = null, libraryUrl = "" } = {}) {
+    const panel = form.closest(".quick-tunnel-panel") || document;
+    const shell = panel.querySelector("[data-wmp-sync-shell]");
+    const phaseNode = panel.querySelector("[data-wmp-sync-phase]");
+    const detailNode = panel.querySelector("[data-wmp-sync-current]");
+    const libraryLink = panel.querySelector("[data-wmp-sync-library-link]");
+    const progress = panel.querySelector("[data-wmp-sync-progress]");
+    const bar = panel.querySelector("[data-wmp-sync-bar]");
+    const copy = panel.querySelector("[data-wmp-sync-copy]");
+
+    if (!shell) {
+      return;
+    }
+
+    shell.hidden = !visible;
+    if (phaseNode) {
+      phaseNode.textContent = phase || "Syncing Windows Media Player...";
+    }
+    if (detailNode) {
+      detailNode.textContent = detail || "Preparing sync...";
+    }
+    if (libraryLink) {
+      if (libraryUrl) {
+        libraryLink.hidden = false;
+        libraryLink.setAttribute("href", libraryUrl);
+      } else {
+        libraryLink.hidden = true;
+        libraryLink.setAttribute("href", "#");
+      }
+    }
+
+    if (!progress || !bar || !copy) {
+      return;
+    }
+
+    progress.hidden = false;
+    if (typeof percent === "number") {
+      const boundedPercent = Math.max(0, Math.min(100, percent));
+      bar.style.width = `${boundedPercent}%`;
+      bar.classList.remove("is-indeterminate");
+      copy.textContent = `${boundedPercent}%`;
+      return;
+    }
+
+    bar.style.width = "100%";
+    bar.classList.add("is-indeterminate");
+    copy.textContent = "Working...";
+  }
+
+  document.querySelectorAll("[data-wmp-sync-form]").forEach((form) => {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const submitButton = form.querySelector("button[type='submit']");
+      if (submitButton) {
+        submitButton.disabled = true;
+      }
+
+      let libraryUrl = "";
+      try {
+        setWmpSyncStatus(form, {
+          visible: true,
+          phase: "Starting Windows Media Player sync...",
+          detail: "Opening the WMP library...",
+          percent: null,
+        });
+
+        const response = await fetch(form.action, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "fetch",
+          },
+        });
+
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch (_) {
+          payload = {};
+        }
+
+        if (!response.ok || !payload.ok) {
+          throw new Error((payload && payload.error) || (payload.job && payload.job.error) || (payload.wmp && payload.wmp.error) || "Could not sync Windows Media Player.");
+        }
+
+        libraryUrl = (payload.wmp && payload.wmp.library_url) || (payload.job && payload.job.redirect_url) || "";
+        if (libraryUrl) {
+          setWmpSyncStatus(form, {
+            visible: true,
+            phase: "Windows Media Player sync started.",
+            detail: "Tracks will appear in the mirrored library as chunks are saved.",
+            percent: null,
+            libraryUrl,
+          });
+        }
+
+        while (payload.status_url) {
+          const statusResponse = await fetch(payload.status_url, {
+            headers: {
+              Accept: "application/json",
+              "X-Requested-With": "fetch",
+            },
+          });
+
+          const statusPayload = await statusResponse.json();
+          const job = statusPayload.job || {};
+          setWmpSyncStatus(form, {
+            visible: true,
+            phase: job.message || "Syncing Windows Media Player...",
+            detail: job.current_item || job.status || "",
+            percent: typeof job.percent === "number" ? job.percent : null,
+            libraryUrl,
+          });
+
+          if (job.complete) {
+            if (!job.ok) {
+              throw new Error(job.error || job.message || "Could not sync Windows Media Player.");
+            }
+
+            window.location.href = job.redirect_url || libraryUrl || (payload.job && payload.job.redirect_url) || "/";
+            return;
+          }
+
+          await sleep(350);
+        }
+
+        window.location.href = libraryUrl || (payload.job && payload.job.redirect_url) || "/";
+      } catch (error) {
+        setWmpSyncStatus(form, {
+          visible: true,
+          phase: "Windows Media Player sync failed.",
+          detail: error instanceof Error ? error.message : "Could not sync Windows Media Player.",
+          percent: null,
+          libraryUrl,
+        });
+        window.alert(error instanceof Error ? error.message : "Could not sync Windows Media Player.");
+      } finally {
+        if (submitButton) {
+          submitButton.disabled = false;
+        }
+      }
+    });
+  });
+
   const openShareForm = document.querySelector("[data-open-share]");
   if (openShareForm) {
     openShareForm.addEventListener("submit", (event) => {
@@ -1131,16 +1276,16 @@
     }
   }
 
-  const rows = Array.from(document.querySelectorAll("[data-track-row]"));
-  const albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
-  const albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
-  const collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
-  const collectionTrackSections = Array.from(document.querySelectorAll("[data-collection-track-section]"));
-  const collectionTrackAlbums = Array.from(document.querySelectorAll("[data-collection-track-album]"));
-  const selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
-  const albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
-  const collectionSelectionForms = Array.from(document.querySelectorAll("[data-collection-selection-form]"));
-  const collectionSelectionSummaries = Array.from(document.querySelectorAll("[data-collection-selection-summary]"));
+  let rows = Array.from(document.querySelectorAll("[data-track-row]:not(.album-browser-hidden-track)"));
+  let albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
+  let albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
+  let collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
+  let collectionTrackSections = Array.from(document.querySelectorAll("[data-collection-track-section]"));
+  let collectionTrackAlbums = Array.from(document.querySelectorAll("[data-collection-track-album]"));
+  let selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
+  let albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
+  let collectionSelectionForms = Array.from(document.querySelectorAll("[data-collection-selection-form]"));
+  let collectionSelectionSummaries = Array.from(document.querySelectorAll("[data-collection-selection-summary]"));
   const player = document.getElementById("deck-player");
   const titleTarget = document.getElementById("now-playing-title");
   const metaTarget = document.getElementById("now-playing-meta");
@@ -1162,7 +1307,7 @@
   const saveButton = document.getElementById("save-track");
   const findAlbumInfoButton = document.getElementById("find-album-info");
   const deleteButton = document.getElementById("delete-track");
-  const filterInput = document.querySelector("[data-track-filter]");
+  let filterInput = document.querySelector("[data-track-filter]");
   const shuffleButton = document.querySelector("[data-transport-shuffle]");
   const prevButton = document.querySelector("[data-transport-prev]");
   const playButton = document.querySelector("[data-transport-play]");
@@ -1182,7 +1327,7 @@
   const lookupAlbumInput = document.getElementById("lookup-album");
   const lookupSearchButton = document.getElementById("lookup-search-button");
   const bulkDeleteUrl = deleteButton ? (deleteButton.getAttribute("data-bulk-delete-url") || "") : "";
-  const targetAlbumSection = document.querySelector("[data-target-album-section]");
+  let targetAlbumSection = document.querySelector("[data-target-album-section]");
   const mediaSession = typeof navigator !== "undefined" ? navigator.mediaSession : null;
   const isAppleMobileMediaSession = (() => {
     if (typeof navigator === "undefined") {
@@ -1208,6 +1353,21 @@
   let playbackRow = null;
   const selectedAlbumKeys = new Set();
   const defaultDocumentTitle = document.title;
+
+  function refreshLibraryNodeLists() {
+    rows = Array.from(document.querySelectorAll("[data-track-row]:not(.album-browser-hidden-track)"));
+    albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
+    albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
+    collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
+    collectionTrackSections = Array.from(document.querySelectorAll("[data-collection-track-section]"));
+    collectionTrackAlbums = Array.from(document.querySelectorAll("[data-collection-track-album]"));
+    selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
+    albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
+    collectionSelectionForms = Array.from(document.querySelectorAll("[data-collection-selection-form]"));
+    collectionSelectionSummaries = Array.from(document.querySelectorAll("[data-collection-selection-summary]"));
+    filterInput = document.querySelector("[data-track-filter]");
+    targetAlbumSection = document.querySelector("[data-target-album-section]");
+  }
 
   function visibleRows() {
     return rows.filter((row) => !row.hidden);
@@ -2124,7 +2284,10 @@
   }
 
   function matchesSearchValue(haystack, query) {
-    return !query || haystack.includes(query);
+    if (!query) {
+      return true;
+    }
+    return query.split(" ").every((token) => !token || haystack.includes(token));
   }
 
   function syncAlbumSectionVisibility() {
@@ -2692,183 +2855,277 @@
     await runLookupSearch();
   }
 
-  if (rows.length) {
-    debugLog("rows.init", {
-      rowCount: rows.length,
-      albumCardCount: albumCards.length,
-      collectionCardCount: collectionCards.length,
-      filterPresent: Boolean(filterInput),
-      sampleRows: rows.slice(0, 5).map((row) => {
-        const track = trackStateFromRow(row);
-        return {
-          id: track ? track.id : "",
-          title: track ? track.title : "",
-          search: rowSearchValue(row),
-        };
-      }),
+  function bindTrackRow(row) {
+    if (!row || row.dataset.boundTrackRow === "1") {
+      return;
+    }
+    row.dataset.boundTrackRow = "1";
+
+    row.addEventListener("click", (event) => {
+      if (isInlineEditTarget(event.target)) {
+        return;
+      }
+
+      const editField = contextEditFieldFromTarget(event.target);
+      if (editField && selectedRows.length === 1 && selectedRow === row) {
+        beginInlineEdit(row, editField);
+        return;
+      }
+
+      if (isRangeSelectEvent(event)) {
+        selectRowRange(row, { append: isMultiSelectEvent(event) });
+        return;
+      }
+
+      if (isMultiSelectEvent(event)) {
+        toggleRowSelection(row);
+        return;
+      }
+
+      selectRow(row, false);
     });
 
-    rows.forEach((row) => {
-      row.addEventListener("click", (event) => {
-        if (isInlineEditTarget(event.target)) {
-          return;
-        }
+    row.addEventListener("keydown", (event) => {
+      if (event.target !== row) {
+        return;
+      }
 
-        const editField = contextEditFieldFromTarget(event.target);
-        if (editField && selectedRows.length === 1 && selectedRow === row) {
-          beginInlineEdit(row, editField);
-          return;
-        }
-
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
         if (isRangeSelectEvent(event)) {
           selectRowRange(row, { append: isMultiSelectEvent(event) });
           return;
         }
-
         if (isMultiSelectEvent(event)) {
           toggleRowSelection(row);
           return;
         }
-
         selectRow(row, false);
-      });
+      }
+    });
 
-      row.addEventListener("keydown", (event) => {
-        if (event.target !== row) {
-          return;
+    row.addEventListener("dblclick", (event) => {
+      if (contextEditFieldFromTarget(event.target) || isInlineEditTarget(event.target)) {
+        return;
+      }
+
+      selectRow(row, true);
+    });
+
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openContextMenu(event, row, contextEditFieldFromTarget(event.target));
+    });
+
+    row.addEventListener("touchstart", (event) => {
+      if (event.touches.length !== 1) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      const editField = contextEditFieldFromTarget(event.target);
+      longPressTimer = window.setTimeout(() => {
+        openContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, row, editField);
+      }, 450);
+    }, { passive: true });
+
+    ["touchend", "touchcancel", "touchmove"].forEach((eventName) => {
+      row.addEventListener(eventName, () => {
+        if (longPressTimer) {
+          window.clearTimeout(longPressTimer);
+          longPressTimer = null;
         }
-
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          if (isRangeSelectEvent(event)) {
-            selectRowRange(row, { append: isMultiSelectEvent(event) });
-            return;
-          }
-          if (isMultiSelectEvent(event)) {
-            toggleRowSelection(row);
-            return;
-          }
-          selectRow(row, false);
-        }
-      });
-
-      row.addEventListener("dblclick", (event) => {
-        if (contextEditFieldFromTarget(event.target) || isInlineEditTarget(event.target)) {
-          return;
-        }
-
-        selectRow(row, true);
-      });
-
-      row.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        openContextMenu(event, row, contextEditFieldFromTarget(event.target));
-      });
-
-      row.addEventListener("touchstart", (event) => {
-        if (event.touches.length !== 1) {
-          return;
-        }
-
-        const touch = event.touches[0];
-        const editField = contextEditFieldFromTarget(event.target);
-        longPressTimer = window.setTimeout(() => {
-          openContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, row, editField);
-        }, 450);
       }, { passive: true });
-
-      ["touchend", "touchcancel", "touchmove"].forEach((eventName) => {
-        row.addEventListener(eventName, () => {
-          if (longPressTimer) {
-            window.clearTimeout(longPressTimer);
-            longPressTimer = null;
-          }
-        }, { passive: true });
-      });
-
-      row.querySelectorAll("[data-inline-rating-value]").forEach((button) => {
-        button.addEventListener("click", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          selectRow(row, false);
-
-          try {
-            await saveInlineRating(row, button.getAttribute("data-inline-rating-value"));
-          } catch (error) {
-            window.alert(error instanceof Error ? error.message : "Could not save rating.");
-          }
-        });
-      });
     });
 
-    albumCards.forEach((card) => {
-      card.addEventListener("click", () => {
-        const browseUrl = card.getAttribute("data-album-browse-url");
-        if (browseUrl) {
-          window.location.href = browseUrl;
-          return;
-        }
-
-        const primaryTrackId = card.getAttribute("data-album-primary-track-id");
-        const row = findRowByTrackId(primaryTrackId);
-        if (row) {
-          selectRow(row, false);
-        }
-      });
-
-      card.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-
-        event.preventDefault();
-        const browseUrl = card.getAttribute("data-album-browse-url");
-        if (browseUrl) {
-          window.location.href = browseUrl;
-          return;
-        }
-
-        const primaryTrackId = card.getAttribute("data-album-primary-track-id");
-        const row = findRowByTrackId(primaryTrackId);
-        if (row) {
-          selectRow(row, false);
-        }
-      });
-    });
-
-    collectionCards.forEach((card) => {
-      card.addEventListener("click", (event) => {
-        if (event.target && typeof event.target.closest === "function" && event.target.closest("[data-collection-album-link]")) {
-          return;
-        }
-
-        const isOpen = card.getAttribute("aria-expanded") === "true";
-        setCollectionOpen(card, !isOpen);
-      });
-
-      card.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-
-        event.preventDefault();
-        const isOpen = card.getAttribute("aria-expanded") === "true";
-        setCollectionOpen(card, !isOpen);
-      });
-    });
-
-    albumSelectButtons.forEach((button) => {
-      button.addEventListener("click", (event) => {
+    row.querySelectorAll("[data-inline-rating-value]").forEach((button) => {
+      if (button.dataset.boundInlineRating === "1") {
+        return;
+      }
+      button.dataset.boundInlineRating = "1";
+      button.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopPropagation();
-        toggleAlbumSelection(button.closest("[data-selectable-album]"));
+        selectRow(row, false);
+
+        try {
+          await saveInlineRating(row, button.getAttribute("data-inline-rating-value"));
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "Could not save rating.");
+        }
       });
     });
-
-    selectRow(rows[0], false);
-  } else {
-    setEditorEnabled(false);
   }
+
+  function bindAlbumCard(card) {
+    if (!card || card.dataset.boundAlbumCard === "1") {
+      return;
+    }
+    card.dataset.boundAlbumCard = "1";
+
+    card.addEventListener("click", () => {
+      const browseUrl = card.getAttribute("data-album-browse-url");
+      if (browseUrl) {
+        window.location.href = browseUrl;
+        return;
+      }
+
+      const primaryTrackId = card.getAttribute("data-album-primary-track-id");
+      const row = findRowByTrackId(primaryTrackId);
+      if (row) {
+        selectRow(row, false);
+      }
+    });
+
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      const browseUrl = card.getAttribute("data-album-browse-url");
+      if (browseUrl) {
+        window.location.href = browseUrl;
+        return;
+      }
+
+      const primaryTrackId = card.getAttribute("data-album-primary-track-id");
+      const row = findRowByTrackId(primaryTrackId);
+      if (row) {
+        selectRow(row, false);
+      }
+    });
+  }
+
+  function bindCollectionCard(card) {
+    if (!card || card.dataset.boundCollectionCard === "1") {
+      return;
+    }
+    card.dataset.boundCollectionCard = "1";
+
+    card.addEventListener("click", (event) => {
+      if (event.target && typeof event.target.closest === "function" && event.target.closest("[data-collection-album-link]")) {
+        return;
+      }
+
+      const isOpen = card.getAttribute("aria-expanded") === "true";
+      setCollectionOpen(card, !isOpen);
+    });
+
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      const isOpen = card.getAttribute("aria-expanded") === "true";
+      setCollectionOpen(card, !isOpen);
+    });
+  }
+
+  function bindAlbumSelectButton(button) {
+    if (!button || button.dataset.boundAlbumSelect === "1") {
+      return;
+    }
+    button.dataset.boundAlbumSelect = "1";
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleAlbumSelection(button.closest("[data-selectable-album]"));
+    });
+  }
+
+  function bindFilterInput() {
+    if (!filterInput || filterInput.dataset.boundTrackFilter === "1") {
+      return;
+    }
+    filterInput.dataset.boundTrackFilter = "1";
+
+    ["input", "search", "change"].forEach((eventName) => {
+      filterInput.addEventListener(eventName, () => {
+        debugLog("filter.event", {
+          eventName,
+          value: filterInput.value,
+        });
+        applySearchFilter(filterInput.value);
+      });
+    });
+  }
+
+  function bindCollectionSelectionForms() {
+    collectionSelectionForms.forEach((form) => {
+      if (form.dataset.boundCollectionSelection === "1") {
+        return;
+      }
+      form.dataset.boundCollectionSelection = "1";
+
+      const picker = form.querySelector("[data-collection-picker]");
+      if (picker) {
+        picker.addEventListener("change", syncCollectionSelectionForms);
+      }
+    });
+  }
+
+  function bindLibraryContent({ selectDefault = false } = {}) {
+    refreshLibraryNodeLists();
+
+    if (rows.length) {
+      debugLog("rows.init", {
+        rowCount: rows.length,
+        albumCardCount: albumCards.length,
+        collectionCardCount: collectionCards.length,
+        filterPresent: Boolean(filterInput),
+        sampleRows: rows.slice(0, 5).map((row) => {
+          const track = trackStateFromRow(row);
+          return {
+            id: track ? track.id : "",
+            title: track ? track.title : "",
+            search: rowSearchValue(row),
+          };
+        }),
+      });
+
+      rows.forEach(bindTrackRow);
+
+      if (selectDefault && !selectedRows.length) {
+        selectRow(rows[0], false);
+      } else {
+        syncSelectionToVisibleRows();
+      }
+    } else {
+      selectedRow = null;
+      selectedRows = [];
+      setEditorEnabled(false);
+      renderSelection(false);
+    }
+
+    albumCards.forEach(bindAlbumCard);
+    collectionCards.forEach(bindCollectionCard);
+    albumSelectButtons.forEach(bindAlbumSelectButton);
+    bindFilterInput();
+
+    if (filterInput && (rows.length || albumCards.length || collectionCards.length || collectionTrackSections.length)) {
+      debugLog("filter.ready", {
+        initialValue: filterInput.value,
+      });
+      applySearchFilter(filterInput.value);
+    } else {
+      debugLog("filter.unavailable", {
+        filterPresent: Boolean(filterInput),
+        rowCount: rows.length,
+        albumCardCount: albumCards.length,
+        collectionCardCount: collectionCards.length,
+      });
+    }
+
+    bindCollectionSelectionForms();
+    if (collectionSelectionForms.length) {
+      syncCollectionSelectionForms();
+    }
+  }
+
+  bindLibraryContent({ selectDefault: true });
 
   if (targetAlbumSection) {
     window.requestAnimationFrame(() => {
@@ -3002,38 +3259,6 @@
         lookupDialog.close();
       }
     });
-  }
-
-  if (filterInput && rows.length) {
-    ["input", "search", "change"].forEach((eventName) => {
-      filterInput.addEventListener(eventName, () => {
-        debugLog("filter.event", {
-          eventName,
-          value: filterInput.value,
-        });
-        applySearchFilter(filterInput.value);
-      });
-    });
-
-    debugLog("filter.ready", {
-      initialValue: filterInput.value,
-    });
-    applySearchFilter(filterInput.value);
-  } else {
-    debugLog("filter.unavailable", {
-      filterPresent: Boolean(filterInput),
-      rowCount: rows.length,
-    });
-  }
-
-  collectionSelectionForms.forEach((form) => {
-    const picker = form.querySelector("[data-collection-picker]");
-    if (picker) {
-      picker.addEventListener("change", syncCollectionSelectionForms);
-    }
-  });
-  if (collectionSelectionForms.length) {
-    syncCollectionSelectionForms();
   }
 
   if (editForm) {
@@ -3221,6 +3446,181 @@
 
     syncTransportProgress();
     updatePlayButton();
+  }
+
+  if (document.body && document.body.dataset.wmpLibrary === "1") {
+    const stateUrl = document.body.dataset.libraryStateUrl || "";
+    let currentTrackCount = Number.parseInt(document.body.dataset.libraryTrackCount || "0", 10);
+    let currentUpdatedAt = document.body.dataset.libraryUpdatedAt || "";
+    let libraryStateTimer = null;
+    let isRefreshingLibraryContent = false;
+
+    function liveSyncNotice() {
+      return document.querySelector("[data-library-live-sync]");
+    }
+
+    function setLibraryLiveSyncNotice(syncState, active) {
+      const notice = liveSyncNotice();
+      if (!notice) {
+        return;
+      }
+
+      notice.hidden = !active;
+      if (!active) {
+        return;
+      }
+
+      notice.textContent = syncState.current_item
+        ? `${syncState.message || "Windows Media Player sync is running."} ${syncState.current_item}`
+        : (syncState.message || "Windows Media Player sync is running. The song list will update as chunks are saved.");
+    }
+
+    function captureLibraryInteractionState() {
+      const selectedIds = selectedTrackIds();
+      const primaryId = trackStateFromRow(selectedRow)?.id || "";
+      const playbackId = trackStateFromRow(currentPlaybackRow())?.id || "";
+      const anchorId = trackStateFromRow(selectionAnchorRow)?.id || "";
+      const activeElement = document.activeElement;
+      const filterWasFocused = Boolean(filterInput && activeElement === filterInput);
+
+      return {
+        selectedIds,
+        primaryId,
+        playbackId,
+        anchorId,
+        filterValue: filterInput ? filterInput.value : "",
+        filterWasFocused,
+        filterSelectionStart: filterWasFocused ? filterInput.selectionStart : null,
+        filterSelectionEnd: filterWasFocused ? filterInput.selectionEnd : null,
+      };
+    }
+
+    function restoreLibraryInteractionState(state) {
+      selectedRows = state.selectedIds.map((trackId) => findRowByTrackId(trackId)).filter(Boolean);
+      selectedRow = findRowByTrackId(state.primaryId) || selectedRows[selectedRows.length - 1] || null;
+      playbackRow = findRowByTrackId(state.playbackId);
+      selectionAnchorRow = findRowByTrackId(state.anchorId) || selectedRow;
+
+      if (filterInput) {
+        filterInput.value = state.filterValue;
+      }
+
+      bindLibraryContent({ selectDefault: !selectedRows.length && !selectedRow });
+
+      if (filterInput) {
+        filterInput.value = state.filterValue;
+        applySearchFilter(state.filterValue);
+
+        if (state.filterWasFocused) {
+          filterInput.focus({ preventScroll: true });
+          if (
+            state.filterSelectionStart !== null
+            && state.filterSelectionEnd !== null
+            && typeof filterInput.setSelectionRange === "function"
+          ) {
+            filterInput.setSelectionRange(state.filterSelectionStart, state.filterSelectionEnd);
+          }
+        }
+      }
+    }
+
+    async function refreshLibraryLiveRegion() {
+      if (isRefreshingLibraryContent || !window.DOMParser) {
+        return false;
+      }
+
+      const currentRegion = document.querySelector("[data-library-live-region]");
+      if (!currentRegion) {
+        return false;
+      }
+
+      isRefreshingLibraryContent = true;
+      try {
+        const state = captureLibraryInteractionState();
+        const response = await fetch(window.location.href, {
+          cache: "no-store",
+          headers: {
+            Accept: "text/html",
+            "X-Requested-With": "fetch",
+          },
+        });
+
+        if (!response.ok) {
+          return false;
+        }
+
+        const text = await response.text();
+        const nextDocument = new DOMParser().parseFromString(text, "text/html");
+        const nextRegion = nextDocument.querySelector("[data-library-live-region]");
+        if (!nextRegion) {
+          return false;
+        }
+
+        const nextBody = nextDocument.body;
+        if (nextBody) {
+          document.body.dataset.libraryTrackCount = nextBody.dataset.libraryTrackCount || document.body.dataset.libraryTrackCount || "0";
+          document.body.dataset.libraryUpdatedAt = nextBody.dataset.libraryUpdatedAt || document.body.dataset.libraryUpdatedAt || "";
+        }
+
+        cancelInlineEdit();
+        hideContextMenu();
+        currentRegion.replaceWith(nextRegion);
+        restoreLibraryInteractionState(state);
+        return true;
+      } catch (_) {
+        return false;
+      } finally {
+        isRefreshingLibraryContent = false;
+      }
+    }
+
+    async function pollLibraryState() {
+      if (!stateUrl || isRefreshingLibraryContent) {
+        return;
+      }
+
+      try {
+        const response = await fetch(stateUrl, {
+          cache: "no-store",
+          headers: {
+            Accept: "application/json",
+            "X-Requested-With": "fetch",
+          },
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json();
+        const libraryState = payload.library || {};
+        const syncState = payload.wmp_sync || {};
+        const nextTrackCount = Number.parseInt(String(libraryState.track_count || 0), 10);
+        const nextUpdatedAt = libraryState.updated_at || "";
+
+        setLibraryLiveSyncNotice(syncState, Boolean(payload.wmp_sync_active));
+
+        if (nextTrackCount !== currentTrackCount || (nextUpdatedAt && nextUpdatedAt !== currentUpdatedAt)) {
+          const refreshed = await refreshLibraryLiveRegion();
+          if (refreshed) {
+            currentTrackCount = nextTrackCount;
+            currentUpdatedAt = nextUpdatedAt;
+            setLibraryLiveSyncNotice(syncState, Boolean(payload.wmp_sync_active));
+          }
+        }
+
+        if (!payload.wmp_sync_active && libraryStateTimer) {
+          window.clearInterval(libraryStateTimer);
+          libraryStateTimer = null;
+          setLibraryLiveSyncNotice({}, false);
+        }
+      } catch (_) {
+        // Ignore transient sync state polling failures.
+      }
+    }
+
+    libraryStateTimer = window.setInterval(pollLibraryState, 1000);
+    pollLibraryState();
   }
 
   if (document.body && document.body.dataset.devMode === "1") {

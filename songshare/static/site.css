@@ -151,6 +151,10 @@ input {
   min-width: 108px;
 }
 
+.wmp-sync-status {
+  width: min(420px, 100%);
+}
+
 .mode-tab,
 .frame-button,
 .row-link,
@@ -683,6 +687,23 @@ input {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.wmp-sync-status {
+  width: 100%;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid #d8e4f1;
+  gap: 6px;
+}
+
+.wmp-sync-status[hidden] {
+  display: none !important;
+}
+
+.wmp-sync-status .upload-progress {
+  min-width: 0;
+  width: 100%;
 }
 
 .owner-dashboard-panel {

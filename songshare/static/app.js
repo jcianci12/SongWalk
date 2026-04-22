@@ -1,6 +1,6 @@
 (function () {
   // Increment this whenever we need to confirm a fresh JS build is running in the browser.
-  const SCRIPT_VERSION = "2026-04-08-download-progress-1";
+  const SCRIPT_VERSION = "2026-04-22-album-drag-drop-1";
   const DEBUG_FILTERING = true;
 
   function debugLog(scope, ...details) {
@@ -1137,6 +1137,7 @@
   const collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
   const collectionTrackSections = Array.from(document.querySelectorAll("[data-collection-track-section]"));
   const collectionTrackAlbums = Array.from(document.querySelectorAll("[data-collection-track-album]"));
+  const albumDropTargets = Array.from(document.querySelectorAll("[data-drop-album-target]"));
   const selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
   const albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
   const collectionSelectionForms = Array.from(document.querySelectorAll("[data-collection-selection-form]"));
@@ -1174,6 +1175,9 @@
   const contextMenu = document.getElementById("track-context-menu");
   const contextEditField = document.getElementById("context-edit-field");
   const contextFindAlbumInfo = document.getElementById("context-find-album-info");
+  const contextDeleteTrack = document.getElementById("context-delete-track");
+  const contextMoveTrack = document.getElementById("context-move-track");
+  const contextMoveLibrary = document.getElementById("context-move-library");
   const lookupDialog = document.getElementById("lookup-dialog");
   const lookupStatus = document.getElementById("lookup-status");
   const lookupResults = document.getElementById("lookup-results");
@@ -1182,6 +1186,7 @@
   const lookupAlbumInput = document.getElementById("lookup-album");
   const lookupSearchButton = document.getElementById("lookup-search-button");
   const bulkDeleteUrl = deleteButton ? (deleteButton.getAttribute("data-bulk-delete-url") || "") : "";
+  const trackMoveUrl = document.body ? (document.body.getAttribute("data-track-move-url") || "") : "";
   const targetAlbumSection = document.querySelector("[data-target-album-section]");
   const mediaSession = typeof navigator !== "undefined" ? navigator.mediaSession : null;
   const isAppleMobileMediaSession = (() => {
@@ -1206,8 +1211,110 @@
   let isShuffleEnabled = false;
   let isRepeatEnabled = false;
   let playbackRow = null;
+  let currentTrackDrag = null;
+  let activeAlbumDropTarget = null;
   const selectedAlbumKeys = new Set();
   const defaultDocumentTitle = document.title;
+
+  function rowAlbumKey(row) {
+    return row ? (row.getAttribute("data-track-album-key") || "") : "";
+  }
+
+  function dropTargetState(node) {
+    if (!node) {
+      return null;
+    }
+
+    return {
+      node,
+      album: (node.getAttribute("data-drop-album-name") || "").trim(),
+      artist: (node.getAttribute("data-drop-album-artist") || "").trim(),
+      key: (node.getAttribute("data-drop-album-key") || "").trim(),
+    };
+  }
+
+  function draggedTrackIdsForRow(row) {
+    const track = trackStateFromRow(row);
+    if (!track || !track.id) {
+      return [];
+    }
+    return selectedRows.includes(row) ? selectedTrackIds() : [track.id];
+  }
+
+  function clearAlbumDropTarget() {
+    if (!activeAlbumDropTarget) {
+      return;
+    }
+    activeAlbumDropTarget.classList.remove("is-drop-target");
+    activeAlbumDropTarget = null;
+  }
+
+  function setAlbumDropTarget(node) {
+    if (!node || activeAlbumDropTarget === node) {
+      return;
+    }
+    clearAlbumDropTarget();
+    activeAlbumDropTarget = node;
+    activeAlbumDropTarget.classList.add("is-drop-target");
+  }
+
+  function clearCurrentTrackDrag() {
+    if (currentTrackDrag) {
+      currentTrackDrag.trackIds.forEach((trackId) => {
+        const row = findRowByTrackId(trackId);
+        if (row) {
+          row.classList.remove("is-drag-source");
+        }
+      });
+    }
+    currentTrackDrag = null;
+    clearAlbumDropTarget();
+    document.body.classList.remove("is-track-dragging");
+  }
+
+  function canDropTracksOnTarget(target) {
+    if (!currentTrackDrag || !target || !target.key) {
+      return false;
+    }
+
+    return currentTrackDrag.trackIds.some((trackId) => {
+      const row = findRowByTrackId(trackId);
+      return rowAlbumKey(row) !== target.key;
+    });
+  }
+
+  async function moveTracksToAlbumTarget(target) {
+    if (!trackMoveUrl) {
+      throw new Error("Could not move tracks.");
+    }
+
+    const { response, payload } = await withGlobalBusy("Moving tracks to album...", async () => {
+      const response = await fetch(trackMoveUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Requested-With": "fetch",
+        },
+        body: JSON.stringify({
+          track_ids: currentTrackDrag ? currentTrackDrag.trackIds : [],
+          album: target.album,
+          artist: target.artist,
+        }),
+      });
+      const payload = await response.json();
+      return { response, payload };
+    });
+
+    if (!response.ok || !payload.ok) {
+      throw new Error((payload && payload.error) || "Could not move tracks.");
+    }
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("view", "tracks");
+    nextUrl.searchParams.set("album", payload.target_album_key || target.key);
+    window.location.href = nextUrl.toString();
+  }
 
   function visibleRows() {
     return rows.filter((row) => !row.hidden);
@@ -1286,6 +1393,7 @@
       updateUrl: dataset.trackUpdateUrl || "",
       ratingUrl: dataset.trackRatingUrl || "",
       deleteUrl: dataset.trackDeleteUrl || "",
+      moveLibraryUrl: dataset.trackMoveLibraryUrl || "",
       lookupUrl: dataset.trackLookupUrl || "",
       lookupApplyUrl: dataset.trackLookupApplyUrl || "",
     };
@@ -2449,6 +2557,15 @@
     if (contextEditField) {
       contextEditField.textContent = contextEditLabel(editField);
     }
+    if (contextDeleteTrack) {
+      contextDeleteTrack.textContent = selectedRows.length > 1 ? `Delete ${selectedRows.length} tracks` : "Delete track";
+    }
+    if (contextMoveLibrary) {
+      contextMoveLibrary.value = "";
+    }
+    if (contextMoveTrack) {
+      contextMoveTrack.disabled = true;
+    }
     contextMenu.dataset.editField = editField || "";
     contextMenu.hidden = false;
     const gutter = 12;
@@ -2799,6 +2916,44 @@
           }
         });
       });
+
+      row.addEventListener("dragstart", (event) => {
+        if (
+          !event.dataTransfer
+          || (event.target && typeof event.target.closest === "function" && event.target.closest("button, input, a"))
+          || isInlineEditTarget(event.target)
+        ) {
+          event.preventDefault();
+          return;
+        }
+
+        if (!selectedRows.includes(row)) {
+          selectRow(row, false);
+        }
+
+        const trackIds = draggedTrackIdsForRow(row);
+        if (!trackIds.length) {
+          event.preventDefault();
+          return;
+        }
+
+        currentTrackDrag = { trackIds };
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("application/x-songwalk-track-ids", JSON.stringify(trackIds));
+        event.dataTransfer.setData("text/plain", `${trackIds.length} track${trackIds.length === 1 ? "" : "s"}`);
+        document.body.classList.add("is-track-dragging");
+
+        trackIds.forEach((trackId) => {
+          const draggedRow = findRowByTrackId(trackId);
+          if (draggedRow) {
+            draggedRow.classList.add("is-drag-source");
+          }
+        });
+      });
+
+      row.addEventListener("dragend", () => {
+        clearCurrentTrackDrag();
+      });
     });
 
     albumCards.forEach((card) => {
@@ -2865,9 +3020,90 @@
       });
     });
 
+    albumDropTargets.forEach((node) => {
+      node.addEventListener("dragenter", (event) => {
+        const target = dropTargetState(node);
+        if (!canDropTracksOnTarget(target)) {
+          return;
+        }
+        event.preventDefault();
+        setAlbumDropTarget(node);
+      });
+
+      node.addEventListener("dragover", (event) => {
+        const target = dropTargetState(node);
+        if (!canDropTracksOnTarget(target)) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        setAlbumDropTarget(node);
+      });
+
+      node.addEventListener("dragleave", (event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget && typeof node.contains === "function" && node.contains(nextTarget)) {
+          return;
+        }
+        if (activeAlbumDropTarget === node) {
+          clearAlbumDropTarget();
+        }
+      });
+
+      node.addEventListener("drop", async (event) => {
+        const target = dropTargetState(node);
+        if (!canDropTracksOnTarget(target)) {
+          return;
+        }
+
+        event.preventDefault();
+        setAlbumDropTarget(node);
+
+        try {
+          await moveTracksToAlbumTarget(target);
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "Could not move tracks.");
+          clearCurrentTrackDrag();
+        }
+      });
+    });
+
     selectRow(rows[0], false);
   } else {
     setEditorEnabled(false);
+  }
+
+  async function moveSelectedTrackToLibrary() {
+    if (!contextMoveLibrary || !selectedRow || selectedRows.length !== 1) {
+      return;
+    }
+
+    const targetLibraryId = (contextMoveLibrary.value || "").trim();
+    const track = trackStateFromRow(selectedRow);
+    const moveLibraryUrl = track ? track.moveLibraryUrl : "";
+    if (!targetLibraryId || !moveLibraryUrl) {
+      return;
+    }
+
+    const { response, payload } = await withGlobalBusy("Moving track to library...", async () => {
+      const response = await fetch(moveLibraryUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Requested-With": "fetch",
+        },
+        body: JSON.stringify({ target_library_id: targetLibraryId }),
+      });
+      const payload = await response.json();
+      return { response, payload };
+    });
+
+    if (!response.ok || !payload.ok) {
+      throw new Error((payload && payload.error) || "Could not move track.");
+    }
+
+    window.location.href = payload.redirect_url || window.location.href;
   }
 
   if (targetAlbumSection) {
@@ -2918,6 +3154,35 @@
       const editField = contextMenu ? (contextMenu.dataset.editField || "") : "";
       hideContextMenu();
       openEditorForField(editField || "title");
+    });
+  }
+
+  if (contextDeleteTrack) {
+    contextDeleteTrack.addEventListener("click", () => {
+      hideContextMenu();
+      if (deleteButton) {
+        deleteButton.click();
+      }
+    });
+  }
+
+  if (contextMoveLibrary) {
+    contextMoveLibrary.addEventListener("change", () => {
+      if (contextMoveTrack) {
+        contextMoveTrack.disabled = !(selectedRows.length === 1 && contextMoveLibrary.value);
+      }
+    });
+  }
+
+  if (contextMoveTrack) {
+    contextMoveTrack.addEventListener("click", async () => {
+      try {
+        await moveSelectedTrackToLibrary();
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Could not move track.");
+      } finally {
+        hideContextMenu();
+      }
     });
   }
 

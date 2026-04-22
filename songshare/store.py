@@ -347,6 +347,113 @@ class Store:
             self._write_library(library)
             return track
 
+    def move_tracks_to_album(
+        self,
+        library_id: str,
+        track_ids: list[str],
+        *,
+        album: str,
+        artist: str,
+    ) -> list[Track]:
+        unique_track_ids = [track_id for track_id in dict.fromkeys(str(track_id).strip() for track_id in track_ids) if track_id]
+        if not unique_track_ids:
+            return []
+
+        with self._lock:
+            library = self.get_library(library_id)
+            track_lookup = {track.id: track for track in library.tracks}
+            moved_tracks: list[Track] = []
+            target_album = album.strip()
+            target_artist = artist.strip()
+            now = _now()
+
+            for track_id in unique_track_ids:
+                track = track_lookup.get(track_id)
+                if track is None:
+                    raise TrackNotFoundError(track_id)
+
+                track.album = target_album
+                track.artist = target_artist
+                write_mp3_metadata(
+                    self.library_files_dir(library_id) / track.stored_name,
+                    title=track.title,
+                    artist=track.artist,
+                    album=track.album,
+                    rating=track.rating,
+                )
+                track.updated_at = now
+                moved_tracks.append(track)
+
+            if moved_tracks:
+                library.updated_at = now
+                self._write_library(library)
+
+            return moved_tracks
+
+    def move_track_to_library(self, source_library_id: str, track_id: str, *, target_library_id: str) -> Track:
+        if source_library_id == target_library_id:
+            raise ValueError("Choose a different library.")
+
+        with self._lock:
+            source_library = self.get_library(source_library_id)
+            target_library = self.get_library(target_library_id)
+            track = self._find_track(source_library, track_id)
+            source_file_path = self.library_files_dir(source_library_id) / track.stored_name
+            if not source_file_path.exists():
+                raise TrackNotFoundError(track_id)
+
+            extension = Path(track.stored_name).suffix or Path(track.original_name).suffix
+            new_track_id = str(uuid.uuid4())
+            new_stored_name = f"{new_track_id}{extension}"
+            target_file_path = self.library_files_dir(target_library_id) / new_stored_name
+            target_file_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file_path, target_file_path)
+
+            new_cover_name = ""
+            if track.cover_art_name:
+                source_cover_path = self.library_covers_dir(source_library_id) / track.cover_art_name
+                if source_cover_path.exists():
+                    cover_extension = Path(track.cover_art_name).suffix or ".jpg"
+                    new_cover_name = f"{new_track_id}{cover_extension}"
+                    target_cover_path = self.library_covers_dir(target_library_id) / new_cover_name
+                    shutil.copy2(source_cover_path, target_cover_path)
+
+            now = _now()
+            moved_track = Track(
+                id=new_track_id,
+                original_name=track.original_name,
+                stored_name=new_stored_name,
+                content_type=track.content_type,
+                size=target_file_path.stat().st_size,
+                uploaded_at=track.uploaded_at,
+                updated_at=now,
+                title=track.title,
+                artist=track.artist,
+                album=track.album,
+                rating=track.rating,
+                cover_art_name=new_cover_name,
+                musicbrainz_release_id=track.musicbrainz_release_id,
+                musicbrainz_release_group_id=track.musicbrainz_release_group_id,
+            )
+
+            target_library.tracks.insert(0, moved_track)
+            target_library.updated_at = now
+
+            source_library.tracks = [item for item in source_library.tracks if item.id != track_id]
+            self._remove_track_ids_from_collections_locked(source_library, [track_id])
+            source_library.updated_at = now
+
+            self._write_library(target_library)
+            self._write_library(source_library)
+
+            _unlink_with_retries(source_file_path)
+            if track.cover_art_name:
+                source_cover_path = self.library_covers_dir(source_library_id) / track.cover_art_name
+                if source_cover_path.exists():
+                    _unlink_with_retries(source_cover_path)
+
+            return moved_track
+
     def set_track_rating(self, library_id: str, track_id: str, *, rating: int | str) -> Track:
         with self._lock:
             library = self.get_library(library_id)

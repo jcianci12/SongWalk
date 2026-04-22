@@ -578,6 +578,7 @@ class SongshareAppTestCase(unittest.TestCase):
         page = self.client.get(f"{library_path}?view=tracks")
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"Group from track selection", page.data)
+        self.assertEqual(page.data.count(b"Group from track selection"), 1)
         self.assertIn(b'data-collection-selection-scope="tracks"', page.data)
         self.assertIn(b"Track selection is collapsed to full albums before grouping", page.data)
         self.assertIn(b"Demo Singles", page.data)
@@ -587,6 +588,171 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"data-track-album-track-ids", page.data)
         self.assertIn(b"context-menu-collection-studio", page.data)
         self.assertIn(b'id="track-context-menu"', page.data)
+        self.assertIn(b'id="context-delete-track"', page.data)
+
+    def test_track_view_renders_drag_drop_and_library_move_controls(self) -> None:
+        first_response = self.client.post(
+            f"/libraries?owner_token={self.owner_token}",
+            data={"name": "Source Library"},
+            follow_redirects=False,
+        )
+        first_library_path = first_response.headers["Location"].split("?", 1)[0]
+        second_response = self.client.post(
+            f"/libraries?owner_token={self.owner_token}",
+            data={"name": "Archive Library"},
+            follow_redirects=False,
+        )
+        second_library_id = second_response.headers["Location"].split("?", 1)[0].rsplit("/", 1)[-1]
+
+        self.client.post(
+            f"{first_library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-track-1"), "one.mp3"),
+                    (io.BytesIO(b"ID3-track-2"), "two.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        first_library_id = first_library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(first_library_id)
+        self.app.config["STORE"].update_track(
+            first_library_id,
+            library.tracks[0].id,
+            title="First Song",
+            artist="Demo Artist",
+            album="First EP",
+        )
+        self.app.config["STORE"].update_track(
+            first_library_id,
+            library.tracks[1].id,
+            title="Second Song",
+            artist="Demo Artist",
+            album="Second EP",
+        )
+
+        page = self.client.get(first_library_path)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(f'data-track-move-url="/s/{first_library_id}/tracks/move"'.encode(), page.data)
+        self.assertIn(b'draggable="true"', page.data)
+        self.assertIn(b"data-drop-album-target", page.data)
+        self.assertIn(b'id="context-move-library"', page.data)
+        self.assertIn(b'id="context-move-track"', page.data)
+        self.assertIn(second_library_id.encode(), page.data)
+        self.assertIn(b"Archive Library", page.data)
+
+    def test_move_tracks_endpoint_moves_selection_into_target_album(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-track-1"), "one.mp3"),
+                    (io.BytesIO(b"ID3-track-2"), "two.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        source_track = library.tracks[0]
+        target_track = library.tracks[1]
+        self.app.config["STORE"].update_track(
+            library_id,
+            source_track.id,
+            title="Source Song",
+            artist="Demo Artist",
+            album="Source EP",
+        )
+        self.app.config["STORE"].update_track(
+            library_id,
+            target_track.id,
+            title="Target Song",
+            artist="Demo Artist",
+            album="Target EP",
+        )
+
+        response = self.client.post(
+            f"/s/{library_id}/tracks/move",
+            json={
+                "track_ids": [source_track.id],
+                "album": "Target EP",
+                "artist": "Demo Artist",
+            },
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["moved"], 1)
+        self.assertEqual(payload["target_album_key"], "target ep::demo artist")
+
+        updated_source = self.app.config["STORE"].get_track(library_id, source_track.id)
+        self.assertEqual(updated_source.album, "Target EP")
+        self.assertEqual(updated_source.artist, "Demo Artist")
+
+    def test_move_track_to_other_library_endpoint_moves_file_and_metadata(self) -> None:
+        source_response = self.client.post(
+            f"/libraries?owner_token={self.owner_token}",
+            data={"name": "Source Library"},
+            follow_redirects=False,
+        )
+        source_library_path = source_response.headers["Location"].split("?", 1)[0]
+        source_library_id = source_library_path.rsplit("/", 1)[-1]
+
+        target_response = self.client.post(
+            f"/libraries?owner_token={self.owner_token}",
+            data={"name": "Archive Library"},
+            follow_redirects=False,
+        )
+        target_library_id = target_response.headers["Location"].split("?", 1)[0].rsplit("/", 1)[-1]
+
+        self.client.post(
+            f"{source_library_path}/upload",
+            data={"tracks": (io.BytesIO(b"FAKE-demo-track"), "demo.mp3")},
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        source_library = self.app.config["STORE"].get_library(source_library_id)
+        track = source_library.tracks[0]
+        self.app.config["STORE"].update_track(
+            source_library_id,
+            track.id,
+            title="Moved Song",
+            artist="Demo Artist",
+            album="Demo Album",
+        )
+
+        response = self.client.post(
+            f"/s/{source_library_id}/tracks/{track.id}/move-library",
+            json={"target_library_id": target_library_id},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["target_library"]["id"], target_library_id)
+        self.assertIn(f"/s/{target_library_id}".encode(), payload["redirect_url"].encode())
+
+        updated_source_library = self.app.config["STORE"].get_library(source_library_id)
+        self.assertEqual(updated_source_library.tracks, [])
+
+        updated_target_library = self.app.config["STORE"].get_library(target_library_id)
+        self.assertEqual(len(updated_target_library.tracks), 1)
+        moved_track = updated_target_library.tracks[0]
+        self.assertEqual(moved_track.title, "Moved Song")
+        self.assertEqual(moved_track.artist, "Demo Artist")
+        self.assertEqual(moved_track.album, "Demo Album")
+        streamed_track, file_path = self.app.config["STORE"].get_track_file(target_library_id, moved_track.id)
+        self.assertEqual(streamed_track.id, moved_track.id)
+        self.assertTrue(file_path.exists())
 
     def test_library_view_renders_drawer_import_controls(self) -> None:
         response = self.create_library()

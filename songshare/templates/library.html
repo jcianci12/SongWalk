@@ -9,7 +9,11 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
   </head>
-  <body class="wmp-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
+  <body
+    class="wmp-page"
+    data-dev-mode="{{ '1' if dev_mode else '0' }}"
+    data-track-move-url="{{ url_for('move_tracks', library_id=library.id) }}"
+  >
     <div class="wmp-window">
       <header class="title-band">
         <div class="title-band-left">
@@ -244,13 +248,6 @@
               {% endif %}
             </section>
           {% else %}
-            {% set collection_scope = 'tracks' %}
-            {% set collection_heading = 'Group from track selection' %}
-            {% set collection_empty_summary = 'Use selected track rows to group whole albums into a collection.' %}
-            {% set collection_item_singular = 'album' %}
-            {% set collection_item_plural = 'albums' %}
-            {% set collection_note = 'Track selection is collapsed to full albums before grouping, so one row from an album is enough.' %}
-            {% include '_collection_studio.html' %}
             <section class="table-shell media-shell">
               <div class="table-head media-head">
                 <span>Album</span>
@@ -308,6 +305,10 @@
                               data-collection-track-album
                               data-album-key="{{ album.key }}"
                               data-search="{{ album.search_value|lower }}"
+                              data-drop-album-target
+                              data-drop-album-name="{{ album.name }}"
+                              data-drop-album-artist="{{ album.artist }}"
+                              data-drop-album-key="{{ album.key }}"
                               {% if selected_album_key and selected_album_key == album.key %}data-target-album-section{% endif %}
                             >
                               <div class="collection-track-group-head">
@@ -332,6 +333,10 @@
                         data-album-container
                         data-search="{{ group.search_value|lower }}"
                         data-album-key="{{ group.key }}"
+                        data-drop-album-target
+                        data-drop-album-name="{{ group.name }}"
+                        data-drop-album-artist="{{ group.artist }}"
+                        data-drop-album-key="{{ group.key }}"
                         {% if selected_album_key and selected_album_key == group.key %}data-target-album-section{% endif %}
                       >
                         <div class="album-summary">
@@ -457,6 +462,19 @@
     <div class="context-menu" id="track-context-menu" hidden>
       <button type="button" class="context-menu-item" id="context-edit-field">Edit details</button>
       <button type="button" class="context-menu-item" id="context-find-album-info">Find album info</button>
+      <button type="button" class="context-menu-item danger" id="context-delete-track">Delete track</button>
+      <div class="context-menu-move">
+        <label class="context-menu-label" for="context-move-library">Move to library</label>
+        <div class="context-menu-move-row">
+          <select id="context-move-library">
+            <option value="">Choose a library...</option>
+            {% for item in other_libraries %}
+              <option value="{{ item.id }}">{{ item.display_name }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="frame-button" id="context-move-track"{% if not other_libraries %} disabled{% endif %}>Move track</button>
+        </div>
+      </div>
       <div class="context-menu-divider" role="separator"></div>
       {% set collection_scope = 'tracks' %}
       {% set collection_heading = 'Group from track selection' %}

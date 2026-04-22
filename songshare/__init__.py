@@ -712,6 +712,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             album_browser_entries=album_browser_entries,
             collection_groups=collection_groups,
             collection_album_lookup=collection_album_lookup,
+            other_libraries=[entry for entry in build_library_summaries() if entry["id"] != library.id],
             album_count=len(album_groups),
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
             library_files_dir=store.library_files_dir(library.id),
@@ -939,6 +940,81 @@ def create_app(test_config: dict | None = None) -> Flask:
             abort(404)
 
         return jsonify({"ok": True, "track": {"id": track.id, "rating": track.rating}})
+
+    @app.post("/s/<library_id>/tracks/move")
+    def move_tracks(library_id: str):
+        payload = request.get_json(silent=True) or {}
+        track_ids = payload.get("track_ids", [])
+        album = str(payload.get("album", "")).strip()
+        artist = str(payload.get("artist", "")).strip()
+
+        if not isinstance(track_ids, list):
+            return jsonify({"ok": False, "error": "track_ids must be a list."}), 400
+        if not album or not artist:
+            return jsonify({"ok": False, "error": "Target album and artist are required."}), 400
+
+        try:
+            moved_tracks = store.move_tracks_to_album(
+                library_id,
+                [str(track_id) for track_id in track_ids],
+                album=album,
+                artist=artist,
+            )
+        except (LibraryNotFoundError, TrackNotFoundError):
+            abort(404)
+
+        target_album_key = album_group_key(album, artist)
+        notice = f"Moved {len(moved_tracks)} track{'s' if len(moved_tracks) != 1 else ''} to {album}."
+
+        if wants_json():
+            return jsonify(
+                {
+                    "ok": True,
+                    "moved": len(moved_tracks),
+                    "album": album,
+                    "artist": artist,
+                    "target_album_key": target_album_key,
+                }
+            )
+
+        return redirect(url_for("view_library", library_id=library_id, view="tracks", album=target_album_key, notice=notice))
+
+    @app.post("/s/<library_id>/tracks/<track_id>/move-library")
+    def move_track_to_library(library_id: str, track_id: str):
+        payload = request.get_json(silent=True) or {}
+        target_library_id = str(payload.get("target_library_id", request.form.get("target_library_id", ""))).strip()
+        if not target_library_id:
+            return jsonify({"ok": False, "error": "Choose a destination library."}), 400
+
+        try:
+            moved_track = store.move_track_to_library(
+                library_id,
+                track_id,
+                target_library_id=target_library_id,
+            )
+            target_library = store.get_library(target_library_id)
+        except (LibraryNotFoundError, TrackNotFoundError):
+            abort(404)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+
+        redirect_url = url_for(
+            "view_library",
+            library_id=target_library_id,
+            notice=f"Moved {moved_track.title or moved_track.original_name} to {target_library.display_name}.",
+        )
+
+        if wants_json():
+            return jsonify(
+                {
+                    "ok": True,
+                    "track": {"id": moved_track.id, "title": moved_track.title, "album": moved_track.album},
+                    "target_library": {"id": target_library.id, "display_name": target_library.display_name},
+                    "redirect_url": redirect_url,
+                }
+            )
+
+        return redirect(redirect_url)
 
     @app.post("/s/<library_id>/tracks/delete")
     def delete_tracks(library_id: str):

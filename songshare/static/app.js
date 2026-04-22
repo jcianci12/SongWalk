@@ -388,6 +388,11 @@
   const remoteImportProgress = document.querySelector("[data-remote-import-progress]");
   const remoteImportBar = document.querySelector("[data-remote-import-bar]");
   const remoteImportCopy = document.querySelector("[data-remote-import-copy]");
+  const sharedLibraryStateUrl = document.body ? (document.body.getAttribute("data-library-state-url") || "") : "";
+  let currentLibraryTrackCount = Number.parseInt(document.body?.getAttribute("data-library-track-count") || "0", 10);
+  let currentLibraryUpdatedAt = document.body?.getAttribute("data-library-updated-at") || "";
+  let sharedLibraryStateTimer = null;
+  let isReloadingForSharedLibraryState = false;
 
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -422,6 +427,51 @@
     remoteImportBar.style.width = "100%";
     remoteImportBar.classList.add("is-indeterminate");
     remoteImportCopy.textContent = "Working...";
+  }
+
+  async function pollSharedLibraryState() {
+    if (!sharedLibraryStateUrl || isReloadingForSharedLibraryState) {
+      return;
+    }
+
+    try {
+      const response = await fetch(sharedLibraryStateUrl, {
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "X-Requested-With": "fetch",
+        },
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json();
+      const libraryState = payload.library || {};
+      const importJob = payload.import_job || {};
+      const nextTrackCount = Number.parseInt(String(libraryState.track_count || 0), 10);
+      const nextUpdatedAt = libraryState.updated_at || "";
+
+      if (payload.import_active) {
+        setRemoteImportStatus({
+          visible: true,
+          phase: importJob.message || "Importing...",
+          detail: importJob.current_item || importJob.status || "",
+          percent: typeof importJob.percent === "number" ? importJob.percent : null,
+        });
+      } else if (remoteImportShell) {
+        remoteImportShell.hidden = true;
+      }
+
+      if (nextTrackCount !== currentLibraryTrackCount || (nextUpdatedAt && nextUpdatedAt !== currentLibraryUpdatedAt)) {
+        isReloadingForSharedLibraryState = true;
+        window.location.reload();
+        return;
+      }
+    } catch (_) {
+      // Ignore transient shared state polling failures.
+    }
   }
 
   async function startRemoteImport(form, sourceUrlOverride = "") {
@@ -522,6 +572,11 @@
       await startRemoteImport(form);
     });
   });
+
+  if (sharedLibraryStateUrl) {
+    sharedLibraryStateTimer = window.setInterval(pollSharedLibraryState, 1500);
+    pollSharedLibraryState();
+  }
 
   const youtubeSearchForm = document.querySelector("[data-youtube-search-form]");
   const youtubeSearchResults = document.querySelector("[data-youtube-search-results]");
@@ -3078,10 +3133,10 @@
       return;
     }
 
-    const targetLibraryId = (contextMoveLibrary.value || "").trim();
+    const targetLibraryToken = (contextMoveLibrary.value || "").trim();
     const track = trackStateFromRow(selectedRow);
     const moveLibraryUrl = track ? track.moveLibraryUrl : "";
-    if (!targetLibraryId || !moveLibraryUrl) {
+    if (!targetLibraryToken || !moveLibraryUrl) {
       return;
     }
 
@@ -3093,7 +3148,7 @@
           "Content-Type": "application/json",
           "X-Requested-With": "fetch",
         },
-        body: JSON.stringify({ target_library_id: targetLibraryId }),
+        body: JSON.stringify({ target_library_token: targetLibraryToken }),
       });
       const payload = await response.json();
       return { response, payload };

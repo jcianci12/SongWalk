@@ -12,6 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
+from itsdangerous import BadSignature, URLSafeSerializer
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
@@ -98,6 +99,14 @@ class ImportJobStore:
         with self._lock:
             self._prune_locked()
             return self._jobs.get(job_id)
+
+    def latest_for_library(self, library_id: str) -> ImportJob | None:
+        with self._lock:
+            self._prune_locked()
+            matches = [job for job in self._jobs.values() if job.library_id == library_id]
+            if not matches:
+                return None
+            return max(matches, key=lambda job: job.updated_at)
 
     def _prune_locked(self) -> None:
         now = time.time()
@@ -285,6 +294,19 @@ def create_app(test_config: dict | None = None) -> Flask:
         if not token or not secrets.compare_digest(token, expected):
             abort(404)
 
+    def move_target_serializer() -> URLSafeSerializer:
+        return URLSafeSerializer(app.config["OWNER_TOKEN"], salt="songwalk-move-target")
+
+    def encode_library_move_target(library_id: str) -> str:
+        return move_target_serializer().dumps({"library_id": library_id})
+
+    def decode_library_move_target(token: str) -> str:
+        try:
+            payload = move_target_serializer().loads(token)
+        except BadSignature as exc:
+            raise ValueError("Choose a valid destination library.") from exc
+        return str(payload.get("library_id", "")).strip()
+
     def build_library_summaries() -> list[dict]:
         libraries = []
         for library in store.list_libraries():
@@ -293,6 +315,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "id": library.id,
                     "name": library.name,
                     "display_name": library.display_name,
+                    "move_label": library.name.strip() or "Untitled library",
                     "track_count": len(library.tracks),
                     "updated_at": library.updated_at,
                     "share_url": f"{base_url()}{url_for('view_library', library_id=library.id)}",
@@ -300,6 +323,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "delete_url": url_for("delete_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
                     "rename_url": url_for("rename_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
                     "files_dir": store.library_files_dir(library.id),
+                    "move_target": encode_library_move_target(library.id),
                 }
             )
         return libraries
@@ -549,6 +573,25 @@ def create_app(test_config: dict | None = None) -> Flask:
         ).start()
         return job
 
+    def public_import_job_status_for_library(library_id: str) -> dict | None:
+        job_store: ImportJobStore = app.config["IMPORT_JOB_STORE"]
+        job = job_store.latest_for_library(library_id)
+        if job is None:
+            return None
+        return {
+            "id": job.id,
+            "library_id": job.library_id,
+            "source": job.source,
+            "status": job.status,
+            "message": job.message,
+            "percent": job.percent,
+            "current_item": job.current_item,
+            "complete": job.complete,
+            "ok": job.ok,
+            "error": job.error,
+            "updated_at": job.updated_at,
+        }
+
     @app.get("/")
     def home():
         return render_template(
@@ -712,7 +755,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             album_browser_entries=album_browser_entries,
             collection_groups=collection_groups,
             collection_album_lookup=collection_album_lookup,
-            other_libraries=[entry for entry in build_library_summaries() if entry["id"] != library.id],
+            other_libraries=[entry for entry in build_library_summaries() if entry["id"] != library.id] if is_direct_local_request() else [],
             album_count=len(album_groups),
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
             library_files_dir=store.library_files_dir(library.id),
@@ -721,6 +764,27 @@ def create_app(test_config: dict | None = None) -> Flask:
             view_mode=view_mode,
             selected_album_key=selected_album_key,
             track_url=track_url,
+        )
+
+    @app.get("/s/<library_id>/state")
+    def library_state(library_id: str):
+        try:
+            library = store.get_library(library_id)
+        except LibraryNotFoundError:
+            abort(404)
+
+        latest_import = public_import_job_status_for_library(library_id)
+        return jsonify(
+            {
+                "ok": True,
+                "library": {
+                    "id": library.id,
+                    "track_count": len(library.tracks),
+                    "updated_at": library.updated_at.isoformat(),
+                },
+                "import_job": latest_import,
+                "import_active": bool(latest_import and not latest_import["complete"]),
+            }
         )
 
     @app.get("/s/<library_id>/import")
@@ -981,8 +1045,16 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     @app.post("/s/<library_id>/tracks/<track_id>/move-library")
     def move_track_to_library(library_id: str, track_id: str):
+        require_local_access()
         payload = request.get_json(silent=True) or {}
         target_library_id = str(payload.get("target_library_id", request.form.get("target_library_id", ""))).strip()
+        if not target_library_id:
+            target_token = str(payload.get("target_library_token", request.form.get("target_library_token", ""))).strip()
+            if target_token:
+                try:
+                    target_library_id = decode_library_move_target(target_token)
+                except ValueError as exc:
+                    return jsonify({"ok": False, "error": str(exc)}), 400
         if not target_library_id:
             return jsonify({"ok": False, "error": "Choose a destination library."}), 400
 

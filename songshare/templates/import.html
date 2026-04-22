@@ -8,7 +8,13 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
     <script defer src="{{ url_for('static', filename='app.js') }}"></script>
   </head>
-  <body class="wmp-page import-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
+  <body
+    class="wmp-page import-page"
+    data-dev-mode="{{ '1' if dev_mode else '0' }}"
+    data-library-state-url="{{ url_for('library_state', library_id=library.id) }}"
+    data-library-track-count="{{ library.tracks|length }}"
+    data-library-updated-at="{{ library.updated_at.isoformat() }}"
+  >
     <div class="wmp-window">
       <header class="title-band">
         <div class="title-band-left">

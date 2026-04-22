@@ -13,6 +13,9 @@
     class="wmp-page"
     data-dev-mode="{{ '1' if dev_mode else '0' }}"
     data-track-move-url="{{ url_for('move_tracks', library_id=library.id) }}"
+    data-library-state-url="{{ url_for('library_state', library_id=library.id) }}"
+    data-library-track-count="{{ library.tracks|length }}"
+    data-library-updated-at="{{ library.updated_at.isoformat() }}"
   >
     <div class="wmp-window">
       <header class="title-band">
@@ -40,6 +43,16 @@
                 <div class="upload-progress-bar" data-download-progress-bar></div>
               </div>
               <span class="upload-progress-copy" data-download-progress-copy>0%</span>
+            </div>
+          </div>
+          <div class="title-upload-status import-status-card" data-remote-import-shell hidden>
+            <p class="status-line title-upload-copy" data-remote-import-phase>Waiting for an import to start...</p>
+            <p class="status-line" data-remote-import-detail>Import progress appears here while remote imports run.</p>
+            <div class="upload-progress title-upload-progress" data-remote-import-progress hidden>
+              <div class="upload-progress-track">
+                <div class="upload-progress-bar" data-remote-import-bar></div>
+              </div>
+              <span class="upload-progress-copy" data-remote-import-copy>Working...</span>
             </div>
           </div>
           <a class="frame-button" href="{{ url_for('view_import', library_id=library.id) }}">Import</a>
@@ -469,7 +482,7 @@
           <select id="context-move-library">
             <option value="">Choose a library...</option>
             {% for item in other_libraries %}
-              <option value="{{ item.id }}">{{ item.display_name }}</option>
+              <option value="{{ item.move_target }}">{{ item.move_label }}</option>
             {% endfor %}
           </select>
           <button type="button" class="frame-button" id="context-move-track"{% if not other_libraries %} disabled{% endif %}>Move track</button>

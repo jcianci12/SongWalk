@@ -67,6 +67,7 @@ class FakeImportService:
         self.calls.append(("youtube", source_url))
         if progress_callback:
             progress_callback(type("Progress", (), {"phase": "downloading", "message": "Downloading YouTube audio...", "percent": 42, "current_item": "Demo video"})())
+        time.sleep(0.15)
         track = self.store.add_track(
             library_id,
             uploaded_track=_uploaded_track("youtube-import.mp3"),
@@ -77,6 +78,7 @@ class FakeImportService:
         self.calls.append(("spotify", source_url))
         if progress_callback:
             progress_callback(type("Progress", (), {"phase": "downloading", "message": "Resolving Spotify track...", "percent": None, "current_item": "Demo track"})())
+        time.sleep(0.15)
         track = self.store.add_track(
             library_id,
             uploaded_track=_uploaded_track("spotify-import.mp3"),
@@ -640,8 +642,8 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"data-drop-album-target", page.data)
         self.assertIn(b'id="context-move-library"', page.data)
         self.assertIn(b'id="context-move-track"', page.data)
-        self.assertIn(second_library_id.encode(), page.data)
         self.assertIn(b"Archive Library", page.data)
+        self.assertNotIn(second_library_id.encode(), page.data)
 
     def test_move_tracks_endpoint_moves_selection_into_target_album(self) -> None:
         response = self.create_library()
@@ -854,6 +856,8 @@ class SongshareAppTestCase(unittest.TestCase):
         self.assertIn(b"data-spotify-search-form", page.data)
         self.assertIn(b"data-spotify-search-results", page.data)
         self.assertIn(b"data-remote-import-shell", page.data)
+        library_id = library_path.rsplit("/", 1)[-1]
+        self.assertIn(f'data-library-state-url="/s/{library_id}/state"'.encode(), page.data)
 
     def test_library_view_does_not_expose_other_library_ids(self) -> None:
         first_response = self.create_library()
@@ -993,6 +997,45 @@ class SongshareAppTestCase(unittest.TestCase):
             app.config["IMPORT_SERVICE"].calls,
             [("youtube", "https://www.youtube.com/watch?v=demo")],
         )
+
+    def test_library_state_reports_active_import_job(self) -> None:
+        temp_dir = new_test_dir()
+        app = create_app(
+            {
+                "TESTING": True,
+                "DATA_DIR": temp_dir,
+                "BASE_URL": "http://localhost:8080",
+                "LOOKUP_CLIENT": FakeLookupClient(),
+            }
+        )
+        app.config["IMPORT_SERVICE"] = FakeImportService(app.config["STORE"])
+        client = app.test_client()
+        owner_token = app.config["OWNER_TOKEN"]
+
+        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        library_path = create_response.headers["Location"].split("?", 1)[0]
+        library_id = library_path.rsplit("/", 1)[-1]
+
+        response = client.post(
+            f"/s/{library_id}/import/youtube",
+            data={"source_url": "https://www.youtube.com/watch?v=demo"},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+
+        state_response = client.get(f"/s/{library_id}/state")
+        self.assertEqual(state_response.status_code, 200)
+        state_payload = state_response.get_json()
+        self.assertTrue(state_payload["ok"])
+        self.assertEqual(state_payload["library"]["id"], library_id)
+        self.assertIsNotNone(state_payload["import_job"])
+        self.assertEqual(state_payload["import_job"]["source"], "youtube")
+        self.assertTrue(state_payload["import_active"])
+        self.assertEqual(state_payload["import_job"]["current_item"], "Demo video")
+
+        status_payload = wait_for_import_job(client, payload["status_url"])
+        self.assertTrue(status_payload["job"]["ok"])
 
     def test_spotify_import_endpoint_uses_import_service(self) -> None:
         temp_dir = new_test_dir()

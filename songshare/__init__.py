@@ -537,6 +537,10 @@ def create_app(test_config: dict | None = None) -> Flask:
             except ImportError as exc:
                 message = str(exc)
                 job_store.finish(job.id, ok=False, message=message, error=message)
+            except Exception:
+                app.logger.exception("Import job %s failed unexpectedly.", job.id)
+                message = "Import failed unexpectedly."
+                job_store.finish(job.id, ok=False, message=message, error=message)
 
         threading.Thread(
             target=worker,

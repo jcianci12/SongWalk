@@ -40,6 +40,7 @@ class LookupCandidate:
 class MusicMetadataClient:
     api_root = "https://musicbrainz.org/ws/2"
     cover_art_root = "https://coverartarchive.org"
+    max_release_lookups_floor = 8
 
     def __init__(self, user_agent: str = "SongWalk/0.1 ( https://localhost )"):
         self._user_agent = user_agent
@@ -70,6 +71,7 @@ class MusicMetadataClient:
         seen_release_ids: set[str] = set()
         candidates: list[tuple[int, LookupCandidate]] = []
         strict_recording_found = False
+        remaining_release_lookups = max(self.max_release_lookups_floor, limit * 4)
 
         for search_type, query, query_limit, fallback_only in searches:
             if fallback_only and strict_recording_found:
@@ -82,10 +84,13 @@ class MusicMetadataClient:
             )
             search_added = False
             for release in self._candidate_releases(search_type, search_results):
+                if remaining_release_lookups <= 0:
+                    break
                 release_id = release.get("id", "")
                 if not release_id or release_id in seen_release_ids:
                     continue
                 seen_release_ids.add(release_id)
+                remaining_release_lookups -= 1
 
                 release_details = self._lookup_release(release_id)
                 match_score, matched_track_title = self._match_track_title(release_details, title)

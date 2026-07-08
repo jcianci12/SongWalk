@@ -1999,7 +1999,7 @@ audio {
   }
 }
 
-/* ---- Spinning CD / Now-Playing Disc ---- */
+/* ---- Spinning Pixel-Art CD / Now-Playing Disc ---- */
 .now-playing-disc-shell {
   display: flex;
   align-items: center;
@@ -2014,43 +2014,98 @@ audio {
   border-radius: 50%;
   flex-shrink: 0;
   overflow: hidden;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  background: #1a1a2e;
+  image-rendering: pixelated;
 }
 
+/* Album art sits on top if available, semi-transparent so CD shows through */
 .now-playing-disc img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
-}
-
-.now-playing-disc .disc-fallback {
-  width: 100%;
-  height: 100%;
   border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, #1a1a2e, #2c82d3);
-  color: #fff;
-  font-weight: 700;
-  font-size: 1.2rem;
+  z-index: 2;
 }
 
-/* CD shine + grooves overlay */
-.now-playing-disc::after {
-  content: '';
+/* Fallback when no album art -- invisible (CD layers show) */
+.now-playing-disc .disc-fallback {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 32% 28%, rgba(255,255,255,0.18) 0%, transparent 50%),
-    radial-gradient(circle at center, transparent 14%, rgba(0,0,0,0.12) 15%, transparent 17%),
-    radial-gradient(circle at center, transparent 22%, rgba(255,255,255,0.10) 23%, transparent 26%),
-    radial-gradient(circle at center, transparent 31%, rgba(0,0,0,0.08) 32%, transparent 35%),
-    radial-gradient(circle at center, transparent 39%, rgba(255,255,255,0.08) 40%, transparent 44%);
+  z-index: 0;
 }
 
+/* ---- CD Pixel-Art Overlay: rainbow prismatic ring ---- */
+.now-playing-disc .disc-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  z-index: 1;
+  pointer-events: none;
+  background: repeating-conic-gradient(
+    from 0deg,
+    #ff4050 0deg   24deg,
+    #ff8c00 24deg  48deg,
+    #ffd700 48deg  72deg,
+    #40c040 72deg  96deg,
+    #4080ff 96deg  120deg,
+    #9040ff 120deg 144deg,
+    #ff4050 144deg 168deg,
+    #ff8c00 168deg 192deg,
+    #ffd700 192deg 216deg,
+    #40c040 216deg 240deg,
+    #4080ff 240deg 264deg,
+    #9040ff 264deg 288deg,
+    #ff4050 288deg 312deg,
+    #ff8c00 312deg 336deg,
+    #ffd700 336deg 360deg
+  );
+  -webkit-mask-image: radial-gradient(
+    circle,
+    transparent 10px,
+    black 11px,
+    black 26px,
+    transparent 27px
+  );
+  mask-image: radial-gradient(
+    circle,
+    transparent 10px,
+    black 11px,
+    black 26px,
+    transparent 27px
+  );
+  opacity: 0.85;
+}
+
+/* Dark outer rim */
+.now-playing-disc .disc-rim {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  z-index: 3;
+  pointer-events: none;
+  border: 3px solid #222;
+  box-shadow: inset 0 0 0 2px #4a4a4a;
+}
+
+/* Center spindle hub */
+.now-playing-disc .disc-hub {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  z-index: 4;
+  pointer-events: none;
+  background: radial-gradient(circle, #555 4px, #333 5px, #1a1a2e 6px);
+  border: 1px solid #444;
+}
+
+/* Spinning */
 .now-playing-disc.is-spinning {
   animation: disc-spin 2s linear infinite;
 }
@@ -2058,6 +2113,16 @@ audio {
 @keyframes disc-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* Pixel shimmer -- subtle static noise over CD when spinning */
+.now-playing-disc.is-spinning .disc-overlay {
+  animation: pixel-shimmer 0.3s steps(4) infinite;
+}
+
+@keyframes pixel-shimmer {
+  0%, 100% { opacity: 0.85; }
+  50%      { opacity: 0.72; }
 }
 
 /* Now-playing info next to disc */
@@ -2097,6 +2162,15 @@ audio {
   .now-playing-disc {
     width: 48px;
     height: 48px;
+  }
+  .now-playing-disc .disc-rim {
+    border-width: 2px;
+    box-shadow: inset 0 0 0 1px #4a4a4a;
+  }
+  .now-playing-disc .disc-hub {
+    width: 16px;
+    height: 16px;
+    background: radial-gradient(circle, #555 3px, #333 4px, #1a1a2e 5px);
   }
   .now-playing-disc-info .disc-track-title {
     font-size: 0.85rem;

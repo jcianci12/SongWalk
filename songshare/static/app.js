@@ -2215,22 +2215,16 @@
     }
 
     var discImg = disc.querySelector('img');
-    var discFallback = disc.querySelector('.disc-fallback');
     var discTitle = document.querySelector('.disc-track-title');
     var discArtist = document.querySelector('.disc-track-artist');
 
     if (discImg && artTarget) {
       var artImg = artTarget.querySelector('img');
-      if (artImg) {
+      if (artImg && artImg.src) {
         discImg.src = artImg.src;
         discImg.style.display = '';
-        if (discFallback) discFallback.style.display = 'none';
       } else {
         discImg.style.display = 'none';
-        if (discFallback) {
-          discFallback.style.display = '';
-          discFallback.textContent = artTarget.textContent || 'SW';
-        }
       }
     }
 
@@ -3683,10 +3677,22 @@
 
     var discFallback = document.createElement('div');
     discFallback.className = 'disc-fallback';
-    discFallback.textContent = 'SW';
+
+    // Pixel-art CD layers
+    var discOverlay = document.createElement('div');
+    discOverlay.className = 'disc-overlay';
+
+    var discRim = document.createElement('div');
+    discRim.className = 'disc-rim';
+
+    var discHub = document.createElement('div');
+    discHub.className = 'disc-hub';
 
     disc.appendChild(discImg);
     disc.appendChild(discFallback);
+    disc.appendChild(discOverlay);
+    disc.appendChild(discRim);
+    disc.appendChild(discHub);
 
     var discInfo = document.createElement('div');
     discInfo.className = 'now-playing-disc-info';

@@ -1999,6 +1999,113 @@ audio {
   }
 }
 
+/* ---- Spinning CD / Now-Playing Disc ---- */
+.now-playing-disc-shell {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 4px;
+}
+
+.now-playing-disc {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
+
+.now-playing-disc img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.now-playing-disc .disc-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #1a1a2e, #2c82d3);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.2rem;
+}
+
+/* CD shine + grooves overlay */
+.now-playing-disc::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255,255,255,0.18) 0%, transparent 50%),
+    radial-gradient(circle at center, transparent 14%, rgba(0,0,0,0.12) 15%, transparent 17%),
+    radial-gradient(circle at center, transparent 22%, rgba(255,255,255,0.10) 23%, transparent 26%),
+    radial-gradient(circle at center, transparent 31%, rgba(0,0,0,0.08) 32%, transparent 35%),
+    radial-gradient(circle at center, transparent 39%, rgba(255,255,255,0.08) 40%, transparent 44%);
+}
+
+.now-playing-disc.is-spinning {
+  animation: disc-spin 2s linear infinite;
+}
+
+@keyframes disc-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Now-playing info next to disc */
+.now-playing-disc-info {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.now-playing-disc-info .disc-track-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.now-playing-disc-info .disc-track-artist {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Transport row wrapping: disc + progress + controls */
+.transport-disc-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* At 720px adjust disc size */
+@media (max-width: 720px) {
+  .now-playing-disc {
+    width: 48px;
+    height: 48px;
+  }
+  .now-playing-disc-info .disc-track-title {
+    font-size: 0.85rem;
+  }
+  .now-playing-disc-info .disc-track-artist {
+    font-size: 0.75rem;
+  }
+}
+
 @media (max-width: 1100px) {
   .wmp-page.is-library-drawer-open {
     overflow: hidden;
@@ -2189,5 +2296,124 @@ audio {
 
   .transport-toggle {
     flex: 1 1 0;
+  }
+
+  .frame-button,
+  .mode-tab,
+  .row-link,
+  .transport-button,
+  .album-select-button,
+  .nav-item,
+  .context-menu-item,
+  .icon-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  input[type="text"],
+  input[type="search"],
+  select {
+    min-height: 44px;
+  }
+
+  .inline-rating-star {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .drawer-handle-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .media-shell {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .media-head,
+  .track-row {
+    min-width: 480px;
+  }
+
+  .transport-band {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .transport-progress-shell {
+    gap: 6px;
+  }
+
+  .transport-controls {
+    gap: 6px;
+  }
+
+  .transport-button.transport-toggle {
+    min-width: 0;
+    padding: 5px 8px;
+    font-size: 0.78rem;
+  }
+
+  .transport-nav {
+    min-width: 44px;
+  }
+
+  .transport-play {
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+  }
+
+  /* Title band overflow menu */
+  .title-actions {
+    position: relative;
+  }
+
+  .title-actions .frame-button:nth-child(n+5) {
+    display: none;
+  }
+
+  .title-actions .frame-button:nth-child(n+5).is-visible {
+    display: inline-flex;
+  }
+
+  .title-actions-overflow {
+    display: inline-flex;
+    min-height: 44px;
+    min-width: 44px;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    border: 1px solid var(--chrome-line-strong, #b8cade);
+    background: linear-gradient(180deg, #fefefe, #d7e5f4);
+    color: var(--text-main, #000);
+    cursor: pointer;
+    font-size: 1.1rem;
+  }
+
+  .title-actions-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 80;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 160px;
+    padding: 6px;
+    border: 1px solid var(--chrome-line-strong, #b8cade);
+    background: linear-gradient(180deg, #fefefe, #eef5fd);
+    box-shadow: 0 8px 20px rgba(46, 73, 103, 0.24);
+  }
+
+  .title-actions-dropdown.is-open {
+    display: flex;
+  }
+
+  .title-actions-dropdown .frame-button {
+    width: 100%;
+    text-align: left;
+    white-space: nowrap;
   }
 }

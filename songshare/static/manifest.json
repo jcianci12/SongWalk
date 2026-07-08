@@ -1,0 +1,17 @@
+{
+  "name": "SongWalk",
+  "short_name": "SongWalk",
+  "description": "Self-hosted music dropbox",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#edf4fb",
+  "theme_color": "#2c82d3",
+  "icons": [
+    {
+      "src": "/static/icons/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

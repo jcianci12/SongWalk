@@ -859,6 +859,16 @@ class SongshareAppTestCase(unittest.TestCase):
         library_id = library_path.rsplit("/", 1)[-1]
         self.assertIn(f'data-library-state-url="/s/{library_id}/state"'.encode(), page.data)
 
+    def test_library_view_renders_live_region_and_shared_state_markers(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        page = self.client.get(library_path)
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"data-library-live-region", page.data)
+        library_id = library_path.rsplit("/", 1)[-1]
+        self.assertIn(f'data-library-state-url="/s/{library_id}/state"'.encode(), page.data)
+
     def test_library_view_does_not_expose_other_library_ids(self) -> None:
         first_response = self.create_library()
         first_library_path = first_response.headers["Location"].split("?", 1)[0]

@@ -4,6 +4,10 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2c82d3">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>{{ library.display_name }}</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%232c82d3'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='24' fill='white' font-family='Segoe UI, Arial, sans-serif'%3ESS%3C/text%3E%3C/svg%3E" data-dynamic-favicon>
     <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
@@ -77,54 +81,55 @@
         </aside>
 
         <main class="content-pane">
-          <div class="view-band">
-            <div class="view-band-main">
-              <div class="drawer-handle-row">
-                <button
-                  type="button"
-                  class="drawer-handle-button"
-                  id="toggle-library-drawer"
-                  aria-controls="library-navigation"
-                  aria-expanded="false"
-                  aria-label="Open library drawer"
-                  title="Open library drawer"
-                >
-                  <span aria-hidden="true">&#9881;</span>
-                </button>
-                <div>
-                  <p class="view-caption">All music</p>
-                  <h1>{{ library.display_name }}</h1>
-                  <p class="view-meta library-id-inline">{{ library.id }}</p>
+          <div data-library-live-region>
+            <div class="view-band">
+              <div class="view-band-main">
+                <div class="drawer-handle-row">
+                  <button
+                    type="button"
+                    class="drawer-handle-button"
+                    id="toggle-library-drawer"
+                    aria-controls="library-navigation"
+                    aria-expanded="false"
+                    aria-label="Open library drawer"
+                    title="Open library drawer"
+                  >
+                    <span aria-hidden="true">&#9881;</span>
+                  </button>
+                  <div>
+                    <p class="view-caption">All music</p>
+                    <h1>{{ library.display_name }}</h1>
+                    <p class="view-meta library-id-inline">{{ library.id }}</p>
+                  </div>
+                </div>
+              </div>
+              <div class="view-band-actions">
+                <div class="view-switcher">
+                  <a class="frame-button{% if view_mode == 'tracks' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='tracks') }}">Tracks</a>
+                  <a class="frame-button{% if view_mode == 'albums' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='albums') }}">Albums</a>
+                </div>
+                <div class="search-stack">
+                  <input type="search" placeholder="Search tracks and albums" data-track-filter>
+                  <span class="view-meta">
+                    {% if view_mode == 'albums' %}
+                      {{ album_count }} album{% if album_count != 1 %}s{% endif %}
+                    {% else %}
+                      {{ library.tracks|length }} track{% if library.tracks|length != 1 %}s{% endif %}
+                    {% endif %}
+                  </span>
                 </div>
               </div>
             </div>
-            <div class="view-band-actions">
-              <div class="view-switcher">
-                <a class="frame-button{% if view_mode == 'tracks' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='tracks') }}">Tracks</a>
-                <a class="frame-button{% if view_mode == 'albums' %} is-active{% endif %}" href="{{ url_for('view_library', library_id=library.id, view='albums') }}">Albums</a>
-              </div>
-              <div class="search-stack">
-                <input type="search" placeholder="Search tracks and albums" data-track-filter>
-                <span class="view-meta">
-                  {% if view_mode == 'albums' %}
-                    {{ album_count }} album{% if album_count != 1 %}s{% endif %}
-                  {% else %}
-                    {{ library.tracks|length }} track{% if library.tracks|length != 1 %}s{% endif %}
-                  {% endif %}
-                </span>
-              </div>
-            </div>
-          </div>
 
-          {% if notice %}
-            <div class="flash notice">{{ notice }}</div>
-          {% endif %}
-          {% if error %}
-            <div class="flash error">{{ error }}</div>
-          {% endif %}
+            {% if notice %}
+              <div class="flash notice">{{ notice }}</div>
+            {% endif %}
+            {% if error %}
+              <div class="flash error">{{ error }}</div>
+            {% endif %}
 
-          {% if view_mode == 'albums' %}
-            <section class="album-browser-shell">
+            {% if view_mode == 'albums' %}
+              <section class="album-browser-shell">
               {% set collection_scope = 'albums' %}
               {% set collection_heading = 'Group albums yourself' %}
               {% set collection_empty_summary = 'Select albums, then create a collection or add them to an existing one.' %}
@@ -259,9 +264,9 @@
               {% else %}
                 <div class="empty-table">No tracks yet. Import some music to populate the library view.</div>
               {% endif %}
-            </section>
-          {% else %}
-            <section class="table-shell media-shell">
+              </section>
+            {% else %}
+              <section class="table-shell media-shell">
               <div class="table-head media-head">
                 <span>Album</span>
                 <span>#</span>
@@ -382,8 +387,9 @@
               {% else %}
                 <div class="empty-table">No tracks yet. Import some music to populate the library view.</div>
               {% endif %}
-            </section>
-          {% endif %}
+              </section>
+            {% endif %}
+          </div>
 
           <section class="details-shell">
             <div class="transport-selection-shell">
@@ -543,5 +549,10 @@
         <p id="global-busy-text" aria-live="polite">Working...</p>
       </div>
     </div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}");
+      }
+    </script>
   </body>
 </html>

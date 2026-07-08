@@ -389,6 +389,7 @@
   const remoteImportBar = document.querySelector("[data-remote-import-bar]");
   const remoteImportCopy = document.querySelector("[data-remote-import-copy]");
   const sharedLibraryStateUrl = document.body ? (document.body.getAttribute("data-library-state-url") || "") : "";
+  let libraryLiveRegion = document.querySelector("[data-library-live-region]");
   let currentLibraryTrackCount = Number.parseInt(document.body?.getAttribute("data-library-track-count") || "0", 10);
   let currentLibraryUpdatedAt = document.body?.getAttribute("data-library-updated-at") || "";
   let sharedLibraryStateTimer = null;
@@ -429,6 +430,169 @@
     remoteImportCopy.textContent = "Working...";
   }
 
+  function refreshLibraryNodeLists() {
+    libraryLiveRegion = document.querySelector("[data-library-live-region]");
+    rows = Array.from(document.querySelectorAll("[data-track-row]"));
+    albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
+    albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
+    collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
+    collectionTrackSections = Array.from(document.querySelectorAll("[data-collection-track-section]"));
+    collectionTrackAlbums = Array.from(document.querySelectorAll("[data-collection-track-album]"));
+    albumDropTargets = Array.from(document.querySelectorAll("[data-drop-album-target]"));
+    selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
+    albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
+    collectionSelectionForms = Array.from(document.querySelectorAll("[data-collection-selection-form]"));
+    collectionSelectionSummaries = Array.from(document.querySelectorAll("[data-collection-selection-summary]"));
+    filterInput = document.querySelector("[data-track-filter]");
+    targetAlbumSection = document.querySelector("[data-target-album-section]");
+  }
+
+  function snapshotLibraryUiState() {
+    return {
+      selectedRowId: trackStateFromRow(selectedRow)?.id || "",
+      selectedRowIds: selectedRows.map((row) => trackStateFromRow(row)?.id || "").filter(Boolean),
+      selectionAnchorId: trackStateFromRow(selectionAnchorRow)?.id || "",
+      playbackRowId: trackStateFromRow(currentPlaybackRow())?.id || "",
+      filterValue: filterInput ? filterInput.value : "",
+      filterHadFocus: Boolean(filterInput && document.activeElement === filterInput),
+      editorOpen: Boolean(toggleEditorButton && toggleEditorButton.getAttribute("aria-expanded") === "true"),
+      selectionPanelOpen: Boolean(toggleSelectionPanelButton && toggleSelectionPanelButton.getAttribute("aria-expanded") === "true"),
+    };
+  }
+
+  function restoreLibraryUiState(state = {}) {
+    selectedRows = (state.selectedRowIds || [])
+      .map((trackId) => findRowByTrackId(trackId))
+      .filter(Boolean);
+    selectedRow = findRowByTrackId(state.selectedRowId) || selectedRows[selectedRows.length - 1] || null;
+    setSelectionAnchor(findRowByTrackId(state.selectionAnchorId) || selectedRow || null);
+    setPlaybackRow(findRowByTrackId(state.playbackRowId));
+
+    if (filterInput) {
+      filterInput.value = state.filterValue || "";
+    }
+
+    if (filterInput && rows.length) {
+      applySearchFilter(filterInput.value);
+    } else if (rows.length) {
+      syncSelectionToVisibleRows();
+    } else {
+      setEditorEnabled(false);
+      renderSelection(false);
+    }
+
+    if (state.selectionPanelOpen && selectedRows.length === 1) {
+      setTransportSelectionOpen(true);
+    }
+
+    if (state.editorOpen && selectedRows.length === 1 && toggleEditorButton && !toggleEditorButton.disabled) {
+      setEditorAccordionOpen(true);
+    }
+
+    if (state.filterHadFocus && filterInput) {
+      try {
+        filterInput.focus({ preventScroll: true });
+      } catch (_) {
+        filterInput.focus();
+      }
+    }
+  }
+
+  function clearPlayerSource() {
+    if (!player) {
+      return;
+    }
+
+    player.pause();
+    player.removeAttribute("src");
+    player.load();
+    player.currentTime = 0;
+    setPlaybackRow(null);
+    syncTransportProgress();
+    updateMediaSessionPositionState();
+    updatePlayButton();
+    syncDocumentTitle();
+    syncMediaSession();
+  }
+
+  async function refreshSharedLibraryContent(nextTrackCount, nextUpdatedAt, preservedState = null) {
+    if (!libraryLiveRegion) {
+      return false;
+    }
+
+    const previousState = preservedState || snapshotLibraryUiState();
+    cancelInlineEdit();
+    hideContextMenu();
+    clearCurrentTrackDrag();
+    const response = await fetch(window.location.href, {
+      cache: "no-store",
+      headers: {
+        Accept: "text/html",
+        "X-Requested-With": "fetch",
+      },
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const nextDocument = new DOMParser().parseFromString(await response.text(), "text/html");
+    const nextRegion = nextDocument.querySelector("[data-library-live-region]");
+    if (!nextRegion) {
+      return false;
+    }
+
+    libraryLiveRegion.replaceWith(nextRegion);
+    refreshLibraryNodeLists();
+    bindLibraryContent({ selectDefault: false, scrollToTarget: false });
+    restoreLibraryUiState(previousState);
+
+    const bodyTrackCount = Number.parseInt(nextDocument.body?.getAttribute("data-library-track-count") || String(nextTrackCount || 0), 10);
+    currentLibraryTrackCount = Number.isFinite(bodyTrackCount) ? bodyTrackCount : nextTrackCount;
+    currentLibraryUpdatedAt = nextDocument.body?.getAttribute("data-library-updated-at") || nextUpdatedAt || "";
+
+    if (document.body) {
+      document.body.setAttribute("data-library-track-count", String(currentLibraryTrackCount || 0));
+      document.body.setAttribute("data-library-updated-at", currentLibraryUpdatedAt || "");
+    }
+
+    return true;
+  }
+
+  async function refreshLibraryAfterMutation({ selectedTrackIds = null, selectedTrackId = null, selectionAnchorId = null, deletedTrackIds = [] } = {}) {
+    const preservedState = snapshotLibraryUiState();
+    if (Array.isArray(selectedTrackIds)) {
+      preservedState.selectedRowIds = selectedTrackIds.filter(Boolean);
+    }
+    if (typeof selectedTrackId === "string") {
+      preservedState.selectedRowId = selectedTrackId;
+    }
+    if (typeof selectionAnchorId === "string") {
+      preservedState.selectionAnchorId = selectionAnchorId;
+    }
+
+    const deletedIds = Array.isArray(deletedTrackIds) ? deletedTrackIds.filter(Boolean) : [];
+    if (deletedIds.includes(preservedState.playbackRowId)) {
+      clearPlayerSource();
+      preservedState.playbackRowId = "";
+    }
+    if (deletedIds.includes(preservedState.selectedRowId)) {
+      preservedState.selectedRowId = "";
+    }
+    if (deletedIds.length) {
+      preservedState.selectedRowIds = preservedState.selectedRowIds.filter((trackId) => !deletedIds.includes(trackId));
+      if (deletedIds.includes(preservedState.selectionAnchorId)) {
+        preservedState.selectionAnchorId = "";
+      }
+    }
+
+    const refreshed = await refreshSharedLibraryContent(undefined, undefined, preservedState);
+    if (!refreshed) {
+      window.location.reload();
+    }
+    return refreshed;
+  }
+
   async function pollSharedLibraryState() {
     if (!sharedLibraryStateUrl || isReloadingForSharedLibraryState) {
       return;
@@ -466,7 +630,14 @@
 
       if (nextTrackCount !== currentLibraryTrackCount || (nextUpdatedAt && nextUpdatedAt !== currentLibraryUpdatedAt)) {
         isReloadingForSharedLibraryState = true;
-        window.location.reload();
+        try {
+          const refreshed = await refreshSharedLibraryContent(nextTrackCount, nextUpdatedAt);
+          if (!refreshed) {
+            window.location.reload();
+          }
+        } finally {
+          isReloadingForSharedLibraryState = false;
+        }
         return;
       }
     } catch (_) {
@@ -1186,17 +1357,17 @@
     }
   }
 
-  const rows = Array.from(document.querySelectorAll("[data-track-row]"));
-  const albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
-  const albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
-  const collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
-  const collectionTrackSections = Array.from(document.querySelectorAll("[data-collection-track-section]"));
-  const collectionTrackAlbums = Array.from(document.querySelectorAll("[data-collection-track-album]"));
-  const albumDropTargets = Array.from(document.querySelectorAll("[data-drop-album-target]"));
-  const selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
-  const albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
-  const collectionSelectionForms = Array.from(document.querySelectorAll("[data-collection-selection-form]"));
-  const collectionSelectionSummaries = Array.from(document.querySelectorAll("[data-collection-selection-summary]"));
+  let rows = Array.from(document.querySelectorAll("[data-track-row]"));
+  let albumContainers = Array.from(document.querySelectorAll("[data-album-container]"));
+  let albumCards = Array.from(document.querySelectorAll("[data-album-card]:not([data-collection-card])"));
+  let collectionCards = Array.from(document.querySelectorAll("[data-collection-card]"));
+  let collectionTrackSections = Array.from(document.querySelectorAll("[data-collection-track-section]"));
+  let collectionTrackAlbums = Array.from(document.querySelectorAll("[data-collection-track-album]"));
+  let albumDropTargets = Array.from(document.querySelectorAll("[data-drop-album-target]"));
+  let selectableAlbums = Array.from(document.querySelectorAll("[data-selectable-album]"));
+  let albumSelectButtons = Array.from(document.querySelectorAll("[data-album-select]"));
+  let collectionSelectionForms = Array.from(document.querySelectorAll("[data-collection-selection-form]"));
+  let collectionSelectionSummaries = Array.from(document.querySelectorAll("[data-collection-selection-summary]"));
   const player = document.getElementById("deck-player");
   const titleTarget = document.getElementById("now-playing-title");
   const metaTarget = document.getElementById("now-playing-meta");
@@ -1218,7 +1389,7 @@
   const saveButton = document.getElementById("save-track");
   const findAlbumInfoButton = document.getElementById("find-album-info");
   const deleteButton = document.getElementById("delete-track");
-  const filterInput = document.querySelector("[data-track-filter]");
+  let filterInput = document.querySelector("[data-track-filter]");
   const shuffleButton = document.querySelector("[data-transport-shuffle]");
   const prevButton = document.querySelector("[data-transport-prev]");
   const playButton = document.querySelector("[data-transport-play]");
@@ -1242,7 +1413,7 @@
   const lookupSearchButton = document.getElementById("lookup-search-button");
   const bulkDeleteUrl = deleteButton ? (deleteButton.getAttribute("data-bulk-delete-url") || "") : "";
   const trackMoveUrl = document.body ? (document.body.getAttribute("data-track-move-url") || "") : "";
-  const targetAlbumSection = document.querySelector("[data-target-album-section]");
+  let targetAlbumSection = document.querySelector("[data-target-album-section]");
   const mediaSession = typeof navigator !== "undefined" ? navigator.mediaSession : null;
   const isAppleMobileMediaSession = (() => {
     if (typeof navigator === "undefined") {
@@ -1926,7 +2097,11 @@
         },
         `Saving ${inlineEditField}...`,
       );
-      window.location.reload();
+      await refreshLibraryAfterMutation({
+        selectedTrackIds: track ? [track.id] : [],
+        selectedTrackId: track ? track.id : "",
+        selectionAnchorId: track ? track.id : "",
+      });
     } catch (error) {
       inlineEditSaving = false;
       inlineEditInput.disabled = false;
@@ -2027,6 +2202,44 @@
 
     playButton.innerHTML = player.paused ? "&#9654;" : "&#10074;&#10074;";
     updateMediaSessionPlaybackState();
+  }
+
+  function updateNowPlayingDisc() {
+    var disc = document.querySelector('.now-playing-disc');
+    if (!disc || !player) return;
+
+    if (!player.paused && player.getAttribute('src')) {
+      disc.classList.add('is-spinning');
+    } else {
+      disc.classList.remove('is-spinning');
+    }
+
+    var discImg = disc.querySelector('img');
+    var discFallback = disc.querySelector('.disc-fallback');
+    var discTitle = document.querySelector('.disc-track-title');
+    var discArtist = document.querySelector('.disc-track-artist');
+
+    if (discImg && artTarget) {
+      var artImg = artTarget.querySelector('img');
+      if (artImg) {
+        discImg.src = artImg.src;
+        discImg.style.display = '';
+        if (discFallback) discFallback.style.display = 'none';
+      } else {
+        discImg.style.display = 'none';
+        if (discFallback) {
+          discFallback.style.display = '';
+          discFallback.textContent = artTarget.textContent || 'SW';
+        }
+      }
+    }
+
+    if (discTitle && titleTarget) {
+      discTitle.textContent = titleTarget.textContent;
+    }
+    if (discArtist && metaTarget) {
+      discArtist.textContent = metaTarget.textContent;
+    }
   }
 
   function formatPlaybackTime(value) {
@@ -2824,7 +3037,14 @@
               return;
             }
 
-            window.location.reload();
+            await refreshLibraryAfterMutation({
+              selectedTrackIds: track ? [track.id] : [],
+              selectedTrackId: track ? track.id : "",
+              selectionAnchorId: track ? track.id : "",
+            });
+            if (lookupDialog && lookupDialog.open) {
+              lookupDialog.close();
+            }
           } catch (error) {
             lookupStatus.textContent = error instanceof Error ? error.message : "Could not apply album info.";
           }
@@ -2864,7 +3084,271 @@
     await runLookupSearch();
   }
 
-  if (rows.length) {
+  function bindTrackRow(row) {
+    row.addEventListener("click", (event) => {
+      if (isInlineEditTarget(event.target)) {
+        return;
+      }
+
+      const editField = contextEditFieldFromTarget(event.target);
+      if (editField && selectedRows.length === 1 && selectedRow === row) {
+        beginInlineEdit(row, editField);
+        return;
+      }
+
+      if (isRangeSelectEvent(event)) {
+        selectRowRange(row, { append: isMultiSelectEvent(event) });
+        return;
+      }
+
+      if (isMultiSelectEvent(event)) {
+        toggleRowSelection(row);
+        return;
+      }
+
+      var alreadySelected = row.classList.contains('is-selected');
+      selectRow(row, alreadySelected);
+    });
+
+    row.addEventListener("keydown", (event) => {
+      if (event.target !== row) {
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (isRangeSelectEvent(event)) {
+          selectRowRange(row, { append: isMultiSelectEvent(event) });
+          return;
+        }
+        if (isMultiSelectEvent(event)) {
+          toggleRowSelection(row);
+          return;
+        }
+        selectRow(row, false);
+      }
+    });
+
+    row.addEventListener("dblclick", (event) => {
+      if (contextEditFieldFromTarget(event.target) || isInlineEditTarget(event.target)) {
+        return;
+      }
+
+      selectRow(row, true);
+    });
+
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openContextMenu(event, row, contextEditFieldFromTarget(event.target));
+    });
+
+    row.addEventListener("touchstart", (event) => {
+      if (event.touches.length !== 1) {
+        return;
+      }
+
+      const touch = event.touches[0];
+      const editField = contextEditFieldFromTarget(event.target);
+      longPressTimer = window.setTimeout(() => {
+        openContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, row, editField);
+      }, 450);
+    }, { passive: true });
+
+    ["touchend", "touchcancel", "touchmove"].forEach((eventName) => {
+      row.addEventListener(eventName, () => {
+        if (longPressTimer) {
+          window.clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }, { passive: true });
+    });
+
+    row.querySelectorAll("[data-inline-rating-value]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectRow(row, false);
+
+        try {
+          await saveInlineRating(row, button.getAttribute("data-inline-rating-value"));
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "Could not save rating.");
+        }
+      });
+    });
+
+    row.addEventListener("dragstart", (event) => {
+      if (
+        !event.dataTransfer
+        || (event.target && typeof event.target.closest === "function" && event.target.closest("button, input, a"))
+        || isInlineEditTarget(event.target)
+      ) {
+        event.preventDefault();
+        return;
+      }
+
+      if (!selectedRows.includes(row)) {
+        selectRow(row, false);
+      }
+
+      const trackIds = draggedTrackIdsForRow(row);
+      if (!trackIds.length) {
+        event.preventDefault();
+        return;
+      }
+
+      currentTrackDrag = { trackIds };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("application/x-songwalk-track-ids", JSON.stringify(trackIds));
+      event.dataTransfer.setData("text/plain", `${trackIds.length} track${trackIds.length === 1 ? "" : "s"}`);
+      document.body.classList.add("is-track-dragging");
+
+      trackIds.forEach((trackId) => {
+        const draggedRow = findRowByTrackId(trackId);
+        if (draggedRow) {
+          draggedRow.classList.add("is-drag-source");
+        }
+      });
+    });
+
+    row.addEventListener("dragend", () => {
+      clearCurrentTrackDrag();
+    });
+  }
+
+  function bindAlbumCard(card) {
+    const activateCard = () => {
+      const browseUrl = card.getAttribute("data-album-browse-url");
+      if (browseUrl) {
+        window.location.href = browseUrl;
+        return;
+      }
+
+      const primaryTrackId = card.getAttribute("data-album-primary-track-id");
+      const row = findRowByTrackId(primaryTrackId);
+      if (row) {
+        selectRow(row, false);
+      }
+    };
+
+    card.addEventListener("click", activateCard);
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      activateCard();
+    });
+  }
+
+  function bindCollectionCard(card) {
+    const toggleCard = (event) => {
+      if (event && event.target && typeof event.target.closest === "function" && event.target.closest("[data-collection-album-link]")) {
+        return;
+      }
+
+      const isOpen = card.getAttribute("aria-expanded") === "true";
+      setCollectionOpen(card, !isOpen);
+    };
+
+    card.addEventListener("click", toggleCard);
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      toggleCard(event);
+    });
+  }
+
+  function bindAlbumSelectButton(button) {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleAlbumSelection(button.closest("[data-selectable-album]"));
+    });
+  }
+
+  function bindAlbumDropTarget(node) {
+    node.addEventListener("dragenter", (event) => {
+      const target = dropTargetState(node);
+      if (!canDropTracksOnTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      setAlbumDropTarget(node);
+    });
+
+    node.addEventListener("dragover", (event) => {
+      const target = dropTargetState(node);
+      if (!canDropTracksOnTarget(target)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setAlbumDropTarget(node);
+    });
+
+    node.addEventListener("dragleave", (event) => {
+      const nextTarget = event.relatedTarget;
+      if (nextTarget && typeof node.contains === "function" && node.contains(nextTarget)) {
+        return;
+      }
+      if (activeAlbumDropTarget === node) {
+        clearAlbumDropTarget();
+      }
+    });
+
+    node.addEventListener("drop", async (event) => {
+      const target = dropTargetState(node);
+      if (!canDropTracksOnTarget(target)) {
+        return;
+      }
+
+      event.preventDefault();
+      setAlbumDropTarget(node);
+
+      try {
+        await moveTracksToAlbumTarget(target);
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Could not move tracks.");
+        clearCurrentTrackDrag();
+      }
+    });
+  }
+
+  function bindFilterControl() {
+    if (!filterInput || !rows.length) {
+      debugLog("filter.unavailable", {
+        filterPresent: Boolean(filterInput),
+        rowCount: rows.length,
+      });
+      return;
+    }
+
+    ["input", "search", "change"].forEach((eventName) => {
+      filterInput.addEventListener(eventName, () => {
+        debugLog("filter.event", {
+          eventName,
+          value: filterInput.value,
+        });
+        applySearchFilter(filterInput.value);
+      });
+    });
+
+    debugLog("filter.ready", {
+      initialValue: filterInput.value,
+    });
+  }
+
+  function bindLibraryContent({ selectDefault = false, scrollToTarget = false } = {}) {
+    if (!rows.length) {
+      setEditorEnabled(false);
+      return;
+    }
+
     debugLog("rows.init", {
       rowCount: rows.length,
       albumCardCount: albumCards.length,
@@ -2880,253 +3364,35 @@
       }),
     });
 
-    rows.forEach((row) => {
-      row.addEventListener("click", (event) => {
-        if (isInlineEditTarget(event.target)) {
-          return;
-        }
+    rows.forEach(bindTrackRow);
+    albumCards.forEach(bindAlbumCard);
+    collectionCards.forEach(bindCollectionCard);
+    albumSelectButtons.forEach(bindAlbumSelectButton);
+    albumDropTargets.forEach(bindAlbumDropTarget);
+    bindFilterControl();
 
-        const editField = contextEditFieldFromTarget(event.target);
-        if (editField && selectedRows.length === 1 && selectedRow === row) {
-          beginInlineEdit(row, editField);
-          return;
-        }
-
-        if (isRangeSelectEvent(event)) {
-          selectRowRange(row, { append: isMultiSelectEvent(event) });
-          return;
-        }
-
-        if (isMultiSelectEvent(event)) {
-          toggleRowSelection(row);
-          return;
-        }
-
-        selectRow(row, false);
-      });
-
-      row.addEventListener("keydown", (event) => {
-        if (event.target !== row) {
-          return;
-        }
-
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          if (isRangeSelectEvent(event)) {
-            selectRowRange(row, { append: isMultiSelectEvent(event) });
-            return;
-          }
-          if (isMultiSelectEvent(event)) {
-            toggleRowSelection(row);
-            return;
-          }
-          selectRow(row, false);
-        }
-      });
-
-      row.addEventListener("dblclick", (event) => {
-        if (contextEditFieldFromTarget(event.target) || isInlineEditTarget(event.target)) {
-          return;
-        }
-
-        selectRow(row, true);
-      });
-
-      row.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        openContextMenu(event, row, contextEditFieldFromTarget(event.target));
-      });
-
-      row.addEventListener("touchstart", (event) => {
-        if (event.touches.length !== 1) {
-          return;
-        }
-
-        const touch = event.touches[0];
-        const editField = contextEditFieldFromTarget(event.target);
-        longPressTimer = window.setTimeout(() => {
-          openContextMenu({ clientX: touch.clientX, clientY: touch.clientY }, row, editField);
-        }, 450);
-      }, { passive: true });
-
-      ["touchend", "touchcancel", "touchmove"].forEach((eventName) => {
-        row.addEventListener(eventName, () => {
-          if (longPressTimer) {
-            window.clearTimeout(longPressTimer);
-            longPressTimer = null;
-          }
-        }, { passive: true });
-      });
-
-      row.querySelectorAll("[data-inline-rating-value]").forEach((button) => {
-        button.addEventListener("click", async (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          selectRow(row, false);
-
-          try {
-            await saveInlineRating(row, button.getAttribute("data-inline-rating-value"));
-          } catch (error) {
-            window.alert(error instanceof Error ? error.message : "Could not save rating.");
-          }
-        });
-      });
-
-      row.addEventListener("dragstart", (event) => {
-        if (
-          !event.dataTransfer
-          || (event.target && typeof event.target.closest === "function" && event.target.closest("button, input, a"))
-          || isInlineEditTarget(event.target)
-        ) {
-          event.preventDefault();
-          return;
-        }
-
-        if (!selectedRows.includes(row)) {
-          selectRow(row, false);
-        }
-
-        const trackIds = draggedTrackIdsForRow(row);
-        if (!trackIds.length) {
-          event.preventDefault();
-          return;
-        }
-
-        currentTrackDrag = { trackIds };
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("application/x-songwalk-track-ids", JSON.stringify(trackIds));
-        event.dataTransfer.setData("text/plain", `${trackIds.length} track${trackIds.length === 1 ? "" : "s"}`);
-        document.body.classList.add("is-track-dragging");
-
-        trackIds.forEach((trackId) => {
-          const draggedRow = findRowByTrackId(trackId);
-          if (draggedRow) {
-            draggedRow.classList.add("is-drag-source");
-          }
-        });
-      });
-
-      row.addEventListener("dragend", () => {
-        clearCurrentTrackDrag();
-      });
+    collectionSelectionForms.forEach((form) => {
+      const picker = form.querySelector("[data-collection-picker]");
+      if (picker) {
+        picker.addEventListener("change", syncCollectionSelectionForms);
+      }
     });
+    if (collectionSelectionForms.length) {
+      syncCollectionSelectionForms();
+    }
 
-    albumCards.forEach((card) => {
-      card.addEventListener("click", () => {
-        const browseUrl = card.getAttribute("data-album-browse-url");
-        if (browseUrl) {
-          window.location.href = browseUrl;
-          return;
-        }
+    if (selectDefault && rows.length) {
+      selectRow(rows[0], false);
+    }
 
-        const primaryTrackId = card.getAttribute("data-album-primary-track-id");
-        const row = findRowByTrackId(primaryTrackId);
-        if (row) {
-          selectRow(row, false);
-        }
+    if (scrollToTarget && targetAlbumSection) {
+      window.requestAnimationFrame(() => {
+        targetAlbumSection.scrollIntoView({ block: "start", behavior: "smooth" });
       });
-
-      card.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-
-        event.preventDefault();
-        const browseUrl = card.getAttribute("data-album-browse-url");
-        if (browseUrl) {
-          window.location.href = browseUrl;
-          return;
-        }
-
-        const primaryTrackId = card.getAttribute("data-album-primary-track-id");
-        const row = findRowByTrackId(primaryTrackId);
-        if (row) {
-          selectRow(row, false);
-        }
-      });
-    });
-
-    collectionCards.forEach((card) => {
-      card.addEventListener("click", (event) => {
-        if (event.target && typeof event.target.closest === "function" && event.target.closest("[data-collection-album-link]")) {
-          return;
-        }
-
-        const isOpen = card.getAttribute("aria-expanded") === "true";
-        setCollectionOpen(card, !isOpen);
-      });
-
-      card.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") {
-          return;
-        }
-
-        event.preventDefault();
-        const isOpen = card.getAttribute("aria-expanded") === "true";
-        setCollectionOpen(card, !isOpen);
-      });
-    });
-
-    albumSelectButtons.forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleAlbumSelection(button.closest("[data-selectable-album]"));
-      });
-    });
-
-    albumDropTargets.forEach((node) => {
-      node.addEventListener("dragenter", (event) => {
-        const target = dropTargetState(node);
-        if (!canDropTracksOnTarget(target)) {
-          return;
-        }
-        event.preventDefault();
-        setAlbumDropTarget(node);
-      });
-
-      node.addEventListener("dragover", (event) => {
-        const target = dropTargetState(node);
-        if (!canDropTracksOnTarget(target)) {
-          return;
-        }
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        setAlbumDropTarget(node);
-      });
-
-      node.addEventListener("dragleave", (event) => {
-        const nextTarget = event.relatedTarget;
-        if (nextTarget && typeof node.contains === "function" && node.contains(nextTarget)) {
-          return;
-        }
-        if (activeAlbumDropTarget === node) {
-          clearAlbumDropTarget();
-        }
-      });
-
-      node.addEventListener("drop", async (event) => {
-        const target = dropTargetState(node);
-        if (!canDropTracksOnTarget(target)) {
-          return;
-        }
-
-        event.preventDefault();
-        setAlbumDropTarget(node);
-
-        try {
-          await moveTracksToAlbumTarget(target);
-        } catch (error) {
-          window.alert(error instanceof Error ? error.message : "Could not move tracks.");
-          clearCurrentTrackDrag();
-        }
-      });
-    });
-
-    selectRow(rows[0], false);
-  } else {
-    setEditorEnabled(false);
+    }
   }
+
+  bindLibraryContent({ selectDefault: true, scrollToTarget: true });
 
   async function moveSelectedTrackToLibrary() {
     if (!contextMoveLibrary || !selectedRow || selectedRows.length !== 1) {
@@ -3159,12 +3425,6 @@
     }
 
     window.location.href = payload.redirect_url || window.location.href;
-  }
-
-  if (targetAlbumSection) {
-    window.requestAnimationFrame(() => {
-      targetAlbumSection.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
   }
 
   if (hasLibraryDrawerControls()) {
@@ -3325,35 +3585,7 @@
   }
 
   if (filterInput && rows.length) {
-    ["input", "search", "change"].forEach((eventName) => {
-      filterInput.addEventListener(eventName, () => {
-        debugLog("filter.event", {
-          eventName,
-          value: filterInput.value,
-        });
-        applySearchFilter(filterInput.value);
-      });
-    });
-
-    debugLog("filter.ready", {
-      initialValue: filterInput.value,
-    });
     applySearchFilter(filterInput.value);
-  } else {
-    debugLog("filter.unavailable", {
-      filterPresent: Boolean(filterInput),
-      rowCount: rows.length,
-    });
-  }
-
-  collectionSelectionForms.forEach((form) => {
-    const picker = form.querySelector("[data-collection-picker]");
-    if (picker) {
-      picker.addEventListener("change", syncCollectionSelectionForms);
-    }
-  });
-  if (collectionSelectionForms.length) {
-    syncCollectionSelectionForms();
   }
 
   if (editForm) {
@@ -3365,13 +3597,18 @@
 
       saveButton.disabled = true;
       try {
+        const selectedTrackId = trackStateFromRow(selectedRow)?.id || "";
         await submitTrackUpdate(selectedRow, {
           title: titleInput ? titleInput.value : "",
           artist: artistInput ? artistInput.value : "",
           album: albumInput ? albumInput.value : "",
           rating: ratingInput ? ratingInput.value : "0",
         });
-        window.location.reload();
+        await refreshLibraryAfterMutation({
+          selectedTrackIds: selectedTrackId ? [selectedTrackId] : [],
+          selectedTrackId,
+          selectionAnchorId: selectedTrackId,
+        });
       } finally {
         saveButton.disabled = false;
       }
@@ -3393,6 +3630,7 @@
 
       deleteButton.disabled = true;
       try {
+        const deletedTrackIds = [...trackIds];
         const response = await withGlobalBusy(isBulkDelete ? "Deleting tracks..." : "Deleting track...", async () => {
           if (isBulkDelete) {
             return await fetch(url, {
@@ -3413,13 +3651,62 @@
         });
 
         if (response.ok) {
-          window.location.reload();
+          await refreshLibraryAfterMutation({
+            selectedTrackIds: [],
+            selectedTrackId: "",
+            selectionAnchorId: "",
+            deletedTrackIds,
+          });
         }
       } finally {
         deleteButton.disabled = false;
       }
     });
   }
+
+  (function injectNowPlayingDisc() {
+    var transportBand = document.querySelector('.transport-band');
+    if (!transportBand || !player) return;
+
+    if (transportBand.querySelector('.now-playing-disc-shell')) return;
+
+    var discShell = document.createElement('div');
+    discShell.className = 'now-playing-disc-shell';
+
+    var disc = document.createElement('div');
+    disc.className = 'now-playing-disc';
+
+    var discImg = document.createElement('img');
+    discImg.src = '';
+    discImg.alt = 'Album art';
+    discImg.style.display = 'none';
+
+    var discFallback = document.createElement('div');
+    discFallback.className = 'disc-fallback';
+    discFallback.textContent = 'SW';
+
+    disc.appendChild(discImg);
+    disc.appendChild(discFallback);
+
+    var discInfo = document.createElement('div');
+    discInfo.className = 'now-playing-disc-info';
+
+    var discTitle = document.createElement('span');
+    discTitle.className = 'disc-track-title';
+    discTitle.textContent = 'No track playing';
+
+    var discArtist = document.createElement('span');
+    discArtist.className = 'disc-track-artist';
+    discArtist.textContent = '';
+
+    discInfo.appendChild(discTitle);
+    discInfo.appendChild(discArtist);
+
+    discShell.appendChild(disc);
+    discShell.appendChild(discInfo);
+
+    transportBand.insertBefore(discShell, transportBand.firstChild);
+  })();
 
   if (player && playButton) {
     player.playsInline = true;
@@ -3463,6 +3750,7 @@
       }
 
       updatePlayButton();
+      updateNowPlayingDisc();
     });
 
     if (prevButton) {
@@ -3500,7 +3788,9 @@
     }
 
     player.addEventListener("play", updatePlayButton);
+    player.addEventListener("play", updateNowPlayingDisc);
     player.addEventListener("pause", updatePlayButton);
+    player.addEventListener("pause", updateNowPlayingDisc);
     player.addEventListener("loadedmetadata", () => {
       syncTransportProgress();
       updateMediaSessionPositionState();
@@ -3541,6 +3831,7 @@
 
     syncTransportProgress();
     updatePlayButton();
+    updateNowPlayingDisc();
   }
 
   if (document.body && document.body.dataset.devMode === "1") {
@@ -3574,4 +3865,121 @@
     window.setInterval(pollForReload, 1000);
     pollForReload();
   }
+
+  (function bindTransportSwipe() {
+    var transportBand = document.querySelector('.transport-band');
+    if (!transportBand) return;
+
+    var swipeThreshold = 50;
+    var touchStartX = 0;
+    var touchStartY = 0;
+    var touchStartTime = 0;
+
+    transportBand.addEventListener('touchstart', function(e) {
+      if (e.touches.length !== 1) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      touchStartTime = Date.now();
+    }, { passive: true });
+
+    transportBand.addEventListener('touchend', function(e) {
+      if (!e.changedTouches.length) return;
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      var dy = e.changedTouches[0].clientY - touchStartY;
+      var dt = Date.now() - touchStartTime;
+
+      if (Math.abs(dx) < swipeThreshold) return;
+      if (Math.abs(dy) > Math.abs(dx)) return;
+      if (dt > 500) return;
+
+      if (dx < 0) {
+        if (typeof nextButton !== 'undefined' && nextButton) {
+          nextButton.click();
+        }
+      } else {
+        if (typeof prevButton !== 'undefined' && prevButton) {
+          prevButton.click();
+        }
+      }
+    });
+  })();
+
+  (function bindTitleOverflow() {
+    var titleActions = document.querySelector('.title-actions');
+    if (!titleActions) return;
+
+    var buttons = titleActions.querySelectorAll(':scope > .frame-button');
+    if (buttons.length <= 1) return;
+
+    var overflowBtn = document.createElement('button');
+    overflowBtn.type = 'button';
+    overflowBtn.className = 'title-actions-overflow';
+    overflowBtn.setAttribute('aria-label', 'More actions');
+    overflowBtn.setAttribute('aria-expanded', 'false');
+    overflowBtn.setAttribute('hidden', '');
+    overflowBtn.innerHTML = '&#8943;';
+
+    var dropdown = document.createElement('div');
+    dropdown.className = 'title-actions-dropdown';
+    dropdown.setAttribute('hidden', '');
+
+    for (var i = 1; i < buttons.length; i++) {
+      var clone = buttons[i].cloneNode(true);
+      clone.classList.remove('title-actions-moved');
+      clone.addEventListener('click', (function(orig) {
+        return function(e) {
+          e.stopPropagation();
+          orig.click();
+        };
+      })(buttons[i]));
+      dropdown.appendChild(clone);
+    }
+
+    for (var j = 1; j < buttons.length; j++) {
+      buttons[j].classList.add('title-actions-moved');
+    }
+
+    titleActions.appendChild(overflowBtn);
+    titleActions.appendChild(dropdown);
+
+    overflowBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var isOpen = !dropdown.classList.contains('is-open');
+      if (isOpen) {
+        dropdown.classList.add('is-open');
+        dropdown.removeAttribute('hidden');
+        overflowBtn.setAttribute('aria-expanded', 'true');
+      } else {
+        dropdown.classList.remove('is-open');
+        dropdown.setAttribute('hidden', '');
+        overflowBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!dropdown.classList.contains('is-open')) return;
+      if (!titleActions.contains(e.target)) {
+        dropdown.classList.remove('is-open');
+        dropdown.setAttribute('hidden', '');
+        overflowBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    function updateOverflowVisibility() {
+      var isMobile = window.matchMedia('(max-width: 720px)').matches;
+      for (var k = 1; k < buttons.length; k++) {
+        buttons[k].style.display = isMobile ? 'none' : '';
+      }
+      if (isMobile) {
+        overflowBtn.removeAttribute('hidden');
+      } else {
+        overflowBtn.setAttribute('hidden', '');
+        dropdown.setAttribute('hidden', '');
+        dropdown.classList.remove('is-open');
+      }
+    }
+
+    window.matchMedia('(max-width: 720px)').addEventListener('change', updateOverflowVisibility);
+    updateOverflowVisibility();
+  })();
 })();

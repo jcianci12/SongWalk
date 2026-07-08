@@ -1,0 +1,38 @@
+kind: pipeline
+type: docker
+name: deploy
+
+# Oracle Cloud ARM64 runner — matches ubuntuserver drone configuration.
+platform:
+  os: linux
+  arch: arm64
+
+concurrency:
+  limit: 1
+
+trigger:
+  branch:
+    - main
+  event:
+    - push
+    - manual
+
+steps:
+  - name: deploy
+    image: docker:dind
+    volumes:
+      - name: docker-socket
+        path: /var/run/docker.sock
+    commands:
+      - echo "Deploying SongWalk..."
+      - docker compose version
+      - docker compose -f compose.yaml -f compose.prod.yaml down --timeout 30 --remove-orphans || true
+      - docker compose -f compose.yaml -f compose.prod.yaml up -d --build --force-recreate
+      - docker compose ps
+    environment:
+      SONGSHARE_PUBLISHED_PORT: "18080"
+
+volumes:
+  - name: docker-socket
+    host:
+      path: /var/run/docker.sock

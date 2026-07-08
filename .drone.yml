@@ -26,9 +26,11 @@ steps:
     commands:
       - echo "Deploying SongWalk..."
       - docker compose version
-      - docker compose -f compose.yaml -f compose.prod.yaml down --timeout 30 --remove-orphans || true
-      - docker compose -f compose.yaml -f compose.prod.yaml up -d --build --force-recreate
-      - docker compose ps
+      - docker compose -p songwalk -f compose.yaml -f compose.prod.yaml down --timeout 30 --remove-orphans || true
+      - docker compose -p songwalk -f compose.yaml -f compose.prod.yaml up -d --build --force-recreate
+      - docker compose -p songwalk ps
+      - echo "Connecting NPM to songwalk network..."
+      - docker network connect songwalk_default nginx-app-1 2>/dev/null || echo "(already connected)"
     environment:
       SONGSHARE_PUBLISHED_PORT: "18080"
 

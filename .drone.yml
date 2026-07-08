@@ -12,7 +12,7 @@ concurrency:
 
 trigger:
   branch:
-    - main
+    - prod
   event:
     - push
     - manual

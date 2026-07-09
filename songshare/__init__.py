@@ -1536,6 +1536,32 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         return redirect(url_for("view_library", library_id=library_id))
 
+    @app.get("/email/test/<owner_token>")
+    def email_test_send(owner_token: str):
+        if owner_token != app.config["OWNER_TOKEN"]:
+            abort(404)
+
+        to = request.args.get("to", "").strip()
+        if not to or "@" not in to:
+            if wants_json():
+                return jsonify(
+                    {"ok": False, "error": "?to=email@example.com is required"}
+                ), 400
+            abort(400)
+
+        token = magic_link_store.generate_token(to)
+        verify_url = f"{base_url()}{url_for('verify_magic_link', token=token)}"
+        sent = send_magic_link(to, verify_url)
+
+        return jsonify(
+            {
+                "ok": sent,
+                "to": to,
+                "verify_url": verify_url,
+                "detail": "Email sent" if sent else "SMTP failed — check credentials",
+            }
+        )
+
     return app
 
 

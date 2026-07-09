@@ -23,6 +23,13 @@
         </div>
       </header>
 
+      {% if notice %}
+        <div class="flash notice">{{ notice }}</div>
+      {% endif %}
+      {% if error %}
+        <div class="flash error">{{ error }}</div>
+      {% endif %}
+
       <div class="menu-band">
         <div class="menu-links">
           {% if local_access_mode %}
@@ -78,6 +85,14 @@
               {% include '_quick_tunnel_panel.html' %}
             </section>
           {% else %}
+            <section class="share-entry-card">
+              <p class="share-entry-lead">Enter your email to create or access your music library. We'll send you a magic link — no password needed.</p>
+              <form method="post" action="{{ url_for('send_magic_link_route') }}" class="share-jump" data-magic-link-form>
+                <input type="email" name="email" placeholder="you@example.com" required>
+                <button type="submit" class="frame-button primary">Send me a link</button>
+              </form>
+              <p class="share-entry-note">We'll email you a one-click link. No account, no password.</p>
+            </section>
             <section class="share-entry-card">
               <p class="share-entry-lead">Ask the sender for a full share URL, then paste it above to open that library directly.</p>
               <div class="share-example-shell">

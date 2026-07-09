@@ -11,15 +11,37 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 from itsdangerous import BadSignature, URLSafeSerializer
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 from .album_lookup import LookupError, MusicMetadataClient
-from .importer import ImportError, ImportOutcome, ImportProgressUpdate, LibraryImportService
+from .email_service import send_magic_link
+from .importer import (
+    ImportError,
+    ImportOutcome,
+    ImportProgressUpdate,
+    LibraryImportService,
+)
+from .magic_link import MagicLinkStore
 from .quick_tunnel import QuickTunnelManager, QuickTunnelStatus
-from .store import CollectionNotFoundError, LibraryNotFoundError, Store, TrackNotFoundError, UploadedTrack
+from .store import (
+    CollectionNotFoundError,
+    LibraryNotFoundError,
+    Store,
+    TrackNotFoundError,
+    UploadedTrack,
+)
 
 
 @dataclass
@@ -83,7 +105,15 @@ class ImportJobStore:
             job.updated_at = time.time()
             return job
 
-    def finish(self, job_id: str, *, ok: bool, message: str, redirect_url: str = "", error: str = "") -> ImportJob | None:
+    def finish(
+        self,
+        job_id: str,
+        *,
+        ok: bool,
+        message: str,
+        redirect_url: str = "",
+        error: str = "",
+    ) -> ImportJob | None:
         return self.update(
             job_id,
             status="complete" if ok else "error",
@@ -103,7 +133,9 @@ class ImportJobStore:
     def latest_for_library(self, library_id: str) -> ImportJob | None:
         with self._lock:
             self._prune_locked()
-            matches = [job for job in self._jobs.values() if job.library_id == library_id]
+            matches = [
+                job for job in self._jobs.values() if job.library_id == library_id
+            ]
             if not matches:
                 return None
             return max(matches, key=lambda job: job.updated_at)
@@ -134,7 +166,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         MAX_UPLOAD_MB=max_upload_mb,
         MAX_CONTENT_LENGTH=max_upload_mb * 1024 * 1024,
         PROXY_HOPS=proxy_hops,
-        QUICK_TUNNEL_ENABLED=os.getenv("SONGSHARE_QUICK_TUNNEL_ENABLED", "").lower() in {"1", "true", "yes", "on"},
+        QUICK_TUNNEL_ENABLED=os.getenv("SONGSHARE_QUICK_TUNNEL_ENABLED", "").lower()
+        in {"1", "true", "yes", "on"},
     )
 
     if test_config:
@@ -166,8 +199,12 @@ def create_app(test_config: dict | None = None) -> Flask:
             lookup_client=app.config["LOOKUP_CLIENT"],
             youtube_command=os.getenv("SONGSHARE_YOUTUBE_DL_BIN", "").strip() or None,
             spotify_command=os.getenv("SONGSHARE_SPOTIFY_DL_BIN", "").strip() or None,
-            spotify_client_id=os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "").strip() or None,
-            spotify_client_secret=os.getenv("SONGSHARE_SPOTIFY_CLIENT_SECRET", "").strip() or None,
+            spotify_client_id=os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "").strip()
+            or None,
+            spotify_client_secret=os.getenv(
+                "SONGSHARE_SPOTIFY_CLIENT_SECRET", ""
+            ).strip()
+            or None,
         ),
     )
     owner_token_path = app.config["DATA_DIR"] / "owner-token.txt"
@@ -223,7 +260,10 @@ def create_app(test_config: dict | None = None) -> Flask:
 
     def wants_json() -> bool:
         accept = request.headers.get("Accept", "")
-        return "application/json" in accept or request.headers.get("X-Requested-With") == "fetch"
+        return (
+            "application/json" in accept
+            or request.headers.get("X-Requested-With") == "fetch"
+        )
 
     def owner_path() -> str:
         return app.config["OWNER_PATH"]
@@ -320,8 +360,16 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "updated_at": library.updated_at,
                     "share_url": f"{base_url()}{url_for('view_library', library_id=library.id)}",
                     "browse_url": url_for("view_library", library_id=library.id),
-                    "delete_url": url_for("delete_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
-                    "rename_url": url_for("rename_library", library_id=library.id, owner_token=app.config["OWNER_TOKEN"]),
+                    "delete_url": url_for(
+                        "delete_library",
+                        library_id=library.id,
+                        owner_token=app.config["OWNER_TOKEN"],
+                    ),
+                    "rename_url": url_for(
+                        "rename_library",
+                        library_id=library.id,
+                        owner_token=app.config["OWNER_TOKEN"],
+                    ),
                     "files_dir": store.library_files_dir(library.id),
                     "move_target": encode_library_move_target(library.id),
                 }
@@ -332,12 +380,16 @@ def create_app(test_config: dict | None = None) -> Flask:
         return url_for("stream_track", library_id=library_id, track_id=track_id)
 
     def cover_url(library_id: str, cover_art_name: str) -> str:
-        return url_for("track_cover_art", library_id=library_id, cover_art_name=cover_art_name)
+        return url_for(
+            "track_cover_art", library_id=library_id, cover_art_name=cover_art_name
+        )
 
     def album_group_key(album_name: str, artist_name: str) -> str:
         return f"{album_name.strip().lower()}::{artist_name.strip().lower()}"
 
-    def build_track_view(library_id: str, track, *, album_name: str, artist_name: str) -> dict:
+    def build_track_view(
+        library_id: str, track, *, album_name: str, artist_name: str
+    ) -> dict:
         title = track.title or Path(track.original_name).stem
         return {
             "id": track.id,
@@ -350,8 +402,12 @@ def create_app(test_config: dict | None = None) -> Flask:
             "original_name": track.original_name,
             "size": track.size,
             "updated_at": track.updated_at,
-            "cover_url": cover_url(library_id, track.cover_art_name) if track.cover_art_name else "",
-            "cover_initials": cover_initials(track.album or track.title or track.original_name),
+            "cover_url": cover_url(library_id, track.cover_art_name)
+            if track.cover_art_name
+            else "",
+            "cover_initials": cover_initials(
+                track.album or track.title or track.original_name
+            ),
             "search_value": f"{title} {artist_name} {album_name} {track.original_name}".strip(),
         }
 
@@ -364,10 +420,16 @@ def create_app(test_config: dict | None = None) -> Flask:
         return safe_value or fallback
 
     def archive_track_path(track, used_paths: set[str]) -> str:
-        extension = Path(track.original_name or track.stored_name).suffix or Path(track.stored_name).suffix or ".bin"
+        extension = (
+            Path(track.original_name or track.stored_name).suffix
+            or Path(track.stored_name).suffix
+            or ".bin"
+        )
         artist = archive_component(track.artist, "Unknown artist")
         album = archive_component(track.album, "Unknown album")
-        title = archive_component(track.title or Path(track.original_name).stem, track.id)
+        title = archive_component(
+            track.title or Path(track.original_name).stem, track.id
+        )
         candidate = f"{artist}/{album}/{title}{extension}"
         counter = 2
 
@@ -402,7 +464,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             if track.cover_art_name and not groups[key]["cover_url"]:
                 groups[key]["cover_url"] = cover_url(library.id, track.cover_art_name)
 
-            track_view = build_track_view(library.id, track, album_name=album_name, artist_name=artist_name)
+            track_view = build_track_view(
+                library.id, track, album_name=album_name, artist_name=artist_name
+            )
             groups[key]["tracks"].append(track_view)
             groups[key]["track_ids"].append(track_view["id"])
             groups[key]["search_value"] = (
@@ -420,14 +484,24 @@ def create_app(test_config: dict | None = None) -> Flask:
     def parse_track_ids(raw_value) -> list[str]:
         if isinstance(raw_value, list):
             return [str(item).strip() for item in raw_value if str(item).strip()]
-        return [item.strip() for item in str(raw_value or "").split(",") if item.strip()]
+        return [
+            item.strip() for item in str(raw_value or "").split(",") if item.strip()
+        ]
 
-    def build_collection_groups(library, album_groups: list[dict]) -> tuple[list[dict], set[str]]:
+    def build_collection_groups(
+        library, album_groups: list[dict]
+    ) -> tuple[list[dict], set[str]]:
         grouped_album_keys: set[str] = set()
         collections: list[dict] = []
         for stored_collection in library.collections:
             selected_track_ids = set(stored_collection.track_ids)
-            albums = [group for group in album_groups if any(track_id in selected_track_ids for track_id in group["track_ids"])]
+            albums = [
+                group
+                for group in album_groups
+                if any(
+                    track_id in selected_track_ids for track_id in group["track_ids"]
+                )
+            ]
             if not albums:
                 continue
 
@@ -440,10 +514,16 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "artist": "",
                     "album_count": len(albums),
                     "track_count": sum(len(album["tracks"]) for album in albums),
-                    "cover_url": next((album["cover_url"] for album in albums if album["cover_url"]), ""),
+                    "cover_url": next(
+                        (album["cover_url"] for album in albums if album["cover_url"]),
+                        "",
+                    ),
                     "cover_initials": cover_initials(stored_collection.name),
                     "search_value": " ".join(
-                        [stored_collection.name, *[album["search_value"] for album in albums]]
+                        [
+                            stored_collection.name,
+                            *[album["search_value"] for album in albums],
+                        ]
                     ).strip(),
                     "albums": albums,
                 }
@@ -451,7 +531,9 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         return collections, grouped_album_keys
 
-    def build_album_browser_entries(library, album_groups: list[dict]) -> tuple[list[dict], list[dict]]:
+    def build_album_browser_entries(
+        library, album_groups: list[dict]
+    ) -> tuple[list[dict], list[dict]]:
         collections, grouped_album_keys = build_collection_groups(library, album_groups)
         collection_by_first_key = {
             collection["albums"][0]["key"]: collection
@@ -462,7 +544,12 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         for group in album_groups:
             if group["key"] in collection_by_first_key:
-                entries.append({"kind": "collection", "collection": collection_by_first_key[group["key"]]})
+                entries.append(
+                    {
+                        "kind": "collection",
+                        "collection": collection_by_first_key[group["key"]],
+                    }
+                )
                 continue
             if group["key"] in grouped_album_keys:
                 continue
@@ -494,7 +581,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         if wants_json():
             redirect_url = url_for("view_library", library_id=library_id)
             if outcome.ok:
-                redirect_url = url_for("view_library", library_id=library_id, notice=success_notice)
+                redirect_url = url_for(
+                    "view_library", library_id=library_id, notice=success_notice
+                )
             return (
                 jsonify(
                     {
@@ -508,7 +597,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             )
 
         if outcome.ok:
-            return redirect(url_for("view_library", library_id=library_id, notice=success_notice))
+            return redirect(
+                url_for("view_library", library_id=library_id, notice=success_notice)
+            )
 
         error = outcome.errors[0] if outcome.errors else empty_error
         return redirect(url_for(error_endpoint, library_id=library_id, error=error))
@@ -532,7 +623,11 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         def worker() -> None:
             try:
-                progress(ImportProgressUpdate(phase="starting", message=f"Starting {source.title()} import..."))
+                progress(
+                    ImportProgressUpdate(
+                        phase="starting", message=f"Starting {source.title()} import..."
+                    )
+                )
                 if source == "youtube":
                     outcome = app.config["IMPORT_SERVICE"].import_youtube_url(
                         library_id,
@@ -556,8 +651,12 @@ def create_app(test_config: dict | None = None) -> Flask:
                     return
 
                 with app.test_request_context():
-                    redirect_url = url_for("view_library", library_id=library_id, notice=notice)
-                job_store.finish(job.id, ok=True, message=notice, redirect_url=redirect_url)
+                    redirect_url = url_for(
+                        "view_library", library_id=library_id, notice=notice
+                    )
+                job_store.finish(
+                    job.id, ok=True, message=notice, redirect_url=redirect_url
+                )
             except ImportError as exc:
                 message = str(exc)
                 job_store.finish(job.id, ok=False, message=message, error=message)
@@ -601,6 +700,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             owner_dashboard_url=owner_dashboard_url(),
             owner_path=owner_path(),
             quick_tunnel=quick_tunnel_status(),
+            notice=request.args.get("notice", ""),
+            error=request.args.get("error", ""),
         )
 
     @app.get("/owner/<owner_token>")
@@ -625,36 +726,55 @@ def create_app(test_config: dict | None = None) -> Flask:
         require_local_access()
         manager = quick_tunnel_manager()
         if manager is None:
-            return jsonify({"ok": False, "error": "Quick Tunnel is not available in this runtime."}), 400
+            return jsonify(
+                {"ok": False, "error": "Quick Tunnel is not available in this runtime."}
+            ), 400
         status = manager.rotate(wait_seconds=20.0)
         payload = quick_tunnel_status()
         ok = bool(status.public_url) or bool(status.running)
-        return jsonify({"ok": ok, "tunnel": payload, "error": "" if ok else payload["last_error"]}), 200 if ok else 500
+        return jsonify(
+            {"ok": ok, "tunnel": payload, "error": "" if ok else payload["last_error"]}
+        ), 200 if ok else 500
 
     @app.post("/quick-tunnel/toggle")
     def quick_tunnel_toggle():
         require_local_access()
         manager = quick_tunnel_manager()
         if manager is None:
-            return jsonify({"ok": False, "error": "Quick Tunnel is not available in this runtime."}), 400
+            return jsonify(
+                {"ok": False, "error": "Quick Tunnel is not available in this runtime."}
+            ), 400
 
         current = manager.status()
         if current.running:
             status = manager.stop()
             payload = quick_tunnel_status()
-            return jsonify({"ok": True, "action": "stopped", "tunnel": payload, "error": ""})
+            return jsonify(
+                {"ok": True, "action": "stopped", "tunnel": payload, "error": ""}
+            )
 
         status = manager.start(wait_seconds=20.0)
         payload = quick_tunnel_status()
         ok = bool(status.public_url) or bool(status.running)
-        return jsonify({"ok": ok, "action": "started" if ok else "failed", "tunnel": payload, "error": "" if ok else payload["last_error"]}), 200 if ok else 500
+        return jsonify(
+            {
+                "ok": ok,
+                "action": "started" if ok else "failed",
+                "tunnel": payload,
+                "error": "" if ok else payload["last_error"],
+            }
+        ), 200 if ok else 500
 
     @app.post("/libraries")
     def create_library():
         require_owner_access()
         library = store.create_library(name=request.form.get("name", ""))
         return redirect(
-            url_for("view_library", library_id=library.id, notice="Library ready. Drop tracks into the queue.")
+            url_for(
+                "view_library",
+                library_id=library.id,
+                notice="Library ready. Drop tracks into the queue.",
+            )
         )
 
     @app.post("/libraries/<library_id>/delete")
@@ -674,12 +794,23 @@ def create_app(test_config: dict | None = None) -> Flask:
     def rename_library(library_id: str):
         require_owner_access()
         try:
-            library = store.rename_library(library_id, name=request.form.get("name", ""))
+            library = store.rename_library(
+                library_id, name=request.form.get("name", "")
+            )
         except LibraryNotFoundError:
             abort(404)
 
         if wants_json():
-            return jsonify({"ok": True, "library": {"id": library.id, "name": library.name, "display_name": library.display_name}})
+            return jsonify(
+                {
+                    "ok": True,
+                    "library": {
+                        "id": library.id,
+                        "name": library.name,
+                        "display_name": library.display_name,
+                    },
+                }
+            )
         return redirect(url_for("owner_home", owner_token=app.config["OWNER_TOKEN"]))
 
     @app.post("/s/<library_id>/collections")
@@ -693,11 +824,27 @@ def create_app(test_config: dict | None = None) -> Flask:
         except LibraryNotFoundError:
             abort(404)
         except ValueError as exc:
-            return redirect(url_for("view_library", library_id=library_id, view="albums", error=str(exc)))
+            return redirect(
+                url_for(
+                    "view_library", library_id=library_id, view="albums", error=str(exc)
+                )
+            )
 
         if wants_json():
-            return jsonify({"ok": True, "collection": {"id": collection.id, "name": collection.name}})
-        return redirect(url_for("view_library", library_id=library_id, view="albums", notice=f"Collection {collection.name} created."))
+            return jsonify(
+                {
+                    "ok": True,
+                    "collection": {"id": collection.id, "name": collection.name},
+                }
+            )
+        return redirect(
+            url_for(
+                "view_library",
+                library_id=library_id,
+                view="albums",
+                notice=f"Collection {collection.name} created.",
+            )
+        )
 
     @app.post("/s/<library_id>/collections/add")
     def add_to_collection(library_id: str):
@@ -710,11 +857,27 @@ def create_app(test_config: dict | None = None) -> Flask:
         except (LibraryNotFoundError, CollectionNotFoundError):
             abort(404)
         except ValueError as exc:
-            return redirect(url_for("view_library", library_id=library_id, view="albums", error=str(exc)))
+            return redirect(
+                url_for(
+                    "view_library", library_id=library_id, view="albums", error=str(exc)
+                )
+            )
 
         if wants_json():
-            return jsonify({"ok": True, "collection": {"id": collection.id, "name": collection.name}})
-        return redirect(url_for("view_library", library_id=library_id, view="albums", notice=f"Added albums to {collection.name}."))
+            return jsonify(
+                {
+                    "ok": True,
+                    "collection": {"id": collection.id, "name": collection.name},
+                }
+            )
+        return redirect(
+            url_for(
+                "view_library",
+                library_id=library_id,
+                view="albums",
+                notice=f"Added albums to {collection.name}.",
+            )
+        )
 
     @app.post("/s/<library_id>/collections/remove")
     def remove_from_collections(library_id: str):
@@ -729,8 +892,22 @@ def create_app(test_config: dict | None = None) -> Flask:
         if wants_json():
             return jsonify({"ok": True, "removed": removed})
         if removed:
-            return redirect(url_for("view_library", library_id=library_id, view="albums", notice="Removed selected albums from collections."))
-        return redirect(url_for("view_library", library_id=library_id, view="albums", error="Choose at least one album to ungroup."))
+            return redirect(
+                url_for(
+                    "view_library",
+                    library_id=library_id,
+                    view="albums",
+                    notice="Removed selected albums from collections.",
+                )
+            )
+        return redirect(
+            url_for(
+                "view_library",
+                library_id=library_id,
+                view="albums",
+                error="Choose at least one album to ungroup.",
+            )
+        )
 
     @app.get("/s/<library_id>")
     def view_library(library_id: str):
@@ -745,7 +922,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         selected_album_key = request.args.get("album", "").strip().lower()
 
         album_groups = build_album_groups(library)
-        album_browser_entries, collection_groups = build_album_browser_entries(library, album_groups)
+        album_browser_entries, collection_groups = build_album_browser_entries(
+            library, album_groups
+        )
         collection_album_lookup = build_collection_album_lookup(collection_groups)
 
         return render_template(
@@ -755,7 +934,13 @@ def create_app(test_config: dict | None = None) -> Flask:
             album_browser_entries=album_browser_entries,
             collection_groups=collection_groups,
             collection_album_lookup=collection_album_lookup,
-            other_libraries=[entry for entry in build_library_summaries() if entry["id"] != library.id] if is_direct_local_request() else [],
+            other_libraries=[
+                entry
+                for entry in build_library_summaries()
+                if entry["id"] != library.id
+            ]
+            if is_direct_local_request()
+            else [],
             album_count=len(album_groups),
             share_url=f"{base_url()}{url_for('view_library', library_id=library.id)}",
             library_files_dir=store.library_files_dir(library.id),
@@ -810,10 +995,14 @@ def create_app(test_config: dict | None = None) -> Flask:
         except LibraryNotFoundError:
             abort(404)
 
-        archive_file = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")
+        archive_file = tempfile.SpooledTemporaryFile(
+            max_size=8 * 1024 * 1024, mode="w+b"
+        )
         used_paths: set[str] = set()
 
-        with zipfile.ZipFile(archive_file, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(
+            archive_file, mode="w", compression=zipfile.ZIP_DEFLATED
+        ) as archive:
             if not library.tracks:
                 archive.writestr("README.txt", "SongWalk library is empty.\n")
 
@@ -887,12 +1076,16 @@ def create_app(test_config: dict | None = None) -> Flask:
         except LibraryNotFoundError:
             abort(404)
 
-        files = [file for file in request.files.getlist("tracks") if file and file.filename]
+        files = [
+            file for file in request.files.getlist("tracks") if file and file.filename
+        ]
         if not files:
             message = "Choose at least one audio file."
             if wants_json():
                 return jsonify({"ok": False, "error": message}), 400
-            return redirect(url_for("view_library", library_id=library_id, error=message))
+            return redirect(
+                url_for("view_library", library_id=library_id, error=message)
+            )
 
         uploads = [
             UploadedTrack(
@@ -905,18 +1098,24 @@ def create_app(test_config: dict | None = None) -> Flask:
         ]
 
         try:
-            outcome = app.config["IMPORT_SERVICE"].import_uploaded_files(library_id, uploads)
+            outcome = app.config["IMPORT_SERVICE"].import_uploaded_files(
+                library_id, uploads
+            )
         finally:
             for file in files:
                 file.close()
 
-        notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''}."
+        notice = (
+            f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''}."
+        )
         return import_redirect_response(
             library_id,
             outcome,
             success_notice=notice,
             empty_error="Upload failed.",
-            error_endpoint="view_import" if request.args.get("next", "").strip().lower() == "import" else "view_library",
+            error_endpoint="view_import"
+            if request.args.get("next", "").strip().lower() == "import"
+            else "view_library",
         )
 
     @app.post("/s/<library_id>/import/<source>")
@@ -938,16 +1137,22 @@ def create_app(test_config: dict | None = None) -> Flask:
                 {
                     "ok": True,
                     "job_id": job.id,
-                    "status_url": url_for("import_job_status", library_id=library_id, job_id=job.id),
+                    "status_url": url_for(
+                        "import_job_status", library_id=library_id, job_id=job.id
+                    ),
                 }
             )
 
         try:
             if source == "youtube":
-                outcome = app.config["IMPORT_SERVICE"].import_youtube_url(library_id, source_url)
+                outcome = app.config["IMPORT_SERVICE"].import_youtube_url(
+                    library_id, source_url
+                )
                 notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from YouTube."
             elif source == "spotify":
-                outcome = app.config["IMPORT_SERVICE"].import_spotify_url(library_id, source_url)
+                outcome = app.config["IMPORT_SERVICE"].import_spotify_url(
+                    library_id, source_url
+                )
                 notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from Spotify."
             else:
                 abort(404)
@@ -979,7 +1184,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         if wants_json():
             return jsonify({"ok": True})
 
-        return redirect(url_for("view_library", library_id=library_id, notice="Track details saved."))
+        return redirect(
+            url_for(
+                "view_library", library_id=library_id, notice="Track details saved."
+            )
+        )
 
     @app.post("/s/<library_id>/tracks/<track_id>/delete")
     def delete_track(library_id: str, track_id: str):
@@ -991,7 +1200,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         if wants_json():
             return jsonify({"ok": True})
 
-        return redirect(url_for("view_library", library_id=library_id, notice="Track removed."))
+        return redirect(
+            url_for("view_library", library_id=library_id, notice="Track removed.")
+        )
 
     @app.post("/s/<library_id>/tracks/<track_id>/rating")
     def set_track_rating(library_id: str, track_id: str):
@@ -1015,7 +1226,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         if not isinstance(track_ids, list):
             return jsonify({"ok": False, "error": "track_ids must be a list."}), 400
         if not album or not artist:
-            return jsonify({"ok": False, "error": "Target album and artist are required."}), 400
+            return jsonify(
+                {"ok": False, "error": "Target album and artist are required."}
+            ), 400
 
         try:
             moved_tracks = store.move_tracks_to_album(
@@ -1041,15 +1254,29 @@ def create_app(test_config: dict | None = None) -> Flask:
                 }
             )
 
-        return redirect(url_for("view_library", library_id=library_id, view="tracks", album=target_album_key, notice=notice))
+        return redirect(
+            url_for(
+                "view_library",
+                library_id=library_id,
+                view="tracks",
+                album=target_album_key,
+                notice=notice,
+            )
+        )
 
     @app.post("/s/<library_id>/tracks/<track_id>/move-library")
     def move_track_to_library(library_id: str, track_id: str):
         require_local_access()
         payload = request.get_json(silent=True) or {}
-        target_library_id = str(payload.get("target_library_id", request.form.get("target_library_id", ""))).strip()
+        target_library_id = str(
+            payload.get("target_library_id", request.form.get("target_library_id", ""))
+        ).strip()
         if not target_library_id:
-            target_token = str(payload.get("target_library_token", request.form.get("target_library_token", ""))).strip()
+            target_token = str(
+                payload.get(
+                    "target_library_token", request.form.get("target_library_token", "")
+                )
+            ).strip()
             if target_token:
                 try:
                     target_library_id = decode_library_move_target(target_token)
@@ -1080,8 +1307,15 @@ def create_app(test_config: dict | None = None) -> Flask:
             return jsonify(
                 {
                     "ok": True,
-                    "track": {"id": moved_track.id, "title": moved_track.title, "album": moved_track.album},
-                    "target_library": {"id": target_library.id, "display_name": target_library.display_name},
+                    "track": {
+                        "id": moved_track.id,
+                        "title": moved_track.title,
+                        "album": moved_track.album,
+                    },
+                    "target_library": {
+                        "id": target_library.id,
+                        "display_name": target_library.display_name,
+                    },
                     "redirect_url": redirect_url,
                 }
             )
@@ -1096,7 +1330,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             return jsonify({"ok": False, "error": "track_ids must be a list."}), 400
 
         try:
-            deleted = store.delete_tracks(library_id, [str(track_id) for track_id in track_ids])
+            deleted = store.delete_tracks(
+                library_id, [str(track_id) for track_id in track_ids]
+            )
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
 
@@ -1132,7 +1368,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         if not cover_path.exists():
             abort(404)
 
-        return send_file(cover_path, conditional=True, max_age=0 if app.config["DEV_MODE"] else None)
+        return send_file(
+            cover_path, conditional=True, max_age=0 if app.config["DEV_MODE"] else None
+        )
 
     @app.get("/s/<library_id>/tracks/<track_id>/lookup")
     def lookup_track_album_info(library_id: str, track_id: str):
@@ -1176,10 +1414,14 @@ def create_app(test_config: dict | None = None) -> Flask:
         album = str(payload.get("album", "")).strip()
 
         if not release_id and not release_group_id:
-            return jsonify({"ok": False, "error": "Missing MusicBrainz identifiers."}), 400
+            return jsonify(
+                {"ok": False, "error": "Missing MusicBrainz identifiers."}
+            ), 400
 
         if not any([title, artist, album]):
-            return jsonify({"ok": False, "error": "Missing track metadata to apply."}), 400
+            return jsonify(
+                {"ok": False, "error": "Missing track metadata to apply."}
+            ), 400
 
         try:
             cover_bytes, cover_extension = app.config["LOOKUP_CLIENT"].fetch_cover_art(
@@ -1210,7 +1452,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "title": updated_track.title,
                     "artist": updated_track.artist,
                     "album": updated_track.album,
-                    "cover_url": cover_url(library_id, updated_track.cover_art_name) if updated_track.cover_art_name else "",
+                    "cover_url": cover_url(library_id, updated_track.cover_art_name)
+                    if updated_track.cover_art_name
+                    else "",
                 },
             }
         )
@@ -1224,6 +1468,73 @@ def create_app(test_config: dict | None = None) -> Flask:
         if not app.config["DEV_MODE"]:
             abort(404)
         return {"token": monitor.token if monitor else 0}
+
+    # --- Magic link auth ---
+    magic_link_store = MagicLinkStore(app.config["DATA_DIR"])
+    app.config["MAGIC_LINK_STORE"] = magic_link_store
+
+    @app.post("/api/auth/send-link")
+    def send_magic_link_route():
+        if request.is_json:
+            email = (
+                (request.get_json(silent=True) or {}).get("email", "").strip().lower()
+            )
+        else:
+            email = request.form.get("email", "").strip().lower()
+        if not email or "@" not in email:
+            if wants_json():
+                return jsonify(
+                    {"ok": False, "error": "Enter a valid email address."}
+                ), 400
+            return redirect(url_for("home", error="Enter a valid email address."))
+
+        token = magic_link_store.generate_token(email)
+        verify_url = f"{base_url()}{url_for('verify_magic_link', token=token)}"
+        sent = send_magic_link(email, verify_url)
+
+        if wants_json():
+            if sent:
+                return jsonify(
+                    {"ok": True, "message": "Check your email for the magic link."}
+                )
+            return jsonify(
+                {"ok": False, "error": "Could not send email. Try again later."}
+            ), 500
+
+        if sent:
+            return redirect(
+                url_for("home", notice="Check your email for the magic link.")
+            )
+        return redirect(url_for("home", error="Could not send email. Try again later."))
+
+    @app.get("/auth/verify")
+    def verify_magic_link():
+        token = request.args.get("token", "").strip()
+        if not token:
+            abort(400)
+
+        email = magic_link_store.verify_token(token)
+        if not email:
+            return redirect(
+                url_for(
+                    "home",
+                    error="This link has expired or is invalid. Request a new one.",
+                )
+            )
+
+        library_id = magic_link_store.get_library_id(email)
+        if library_id:
+            try:
+                store.get_library(library_id)
+            except LibraryNotFoundError:
+                library_id = None
+
+        if not library_id:
+            library = store.create_library(name=email)
+            library_id = library.id
+            magic_link_store.set_library_id(email, library_id)
+
+        return redirect(url_for("view_library", library_id=library_id))
 
     return app
 
@@ -1241,7 +1552,9 @@ class DevChangeMonitor:
         if self._thread and self._thread.is_alive():
             return
 
-        self._thread = threading.Thread(target=self._watch_loop, name="songshare-dev-watch", daemon=True)
+        self._thread = threading.Thread(
+            target=self._watch_loop, name="songshare-dev-watch", daemon=True
+        )
         self._thread.start()
 
     def _watch_loop(self) -> None:
@@ -1257,7 +1570,12 @@ class DevChangeMonitor:
             if not root.exists():
                 continue
             for path in root.rglob("*"):
-                if not path.is_file() or path.suffix not in {".py", ".html", ".css", ".js"}:
+                if not path.is_file() or path.suffix not in {
+                    ".py",
+                    ".html",
+                    ".css",
+                    ".js",
+                }:
                     continue
                 try:
                     snapshot[str(path)] = path.stat().st_mtime_ns

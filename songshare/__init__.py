@@ -42,6 +42,7 @@ from .store import (
     TrackNotFoundError,
     UploadedTrack,
 )
+from .sync import init_sync, socketio
 
 
 @dataclass
@@ -1562,6 +1563,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             }
         )
 
+    init_sync(app)
     return app
 
 

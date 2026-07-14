@@ -2491,3 +2491,104 @@ audio {
     white-space: nowrap;
   }
 }
+
+/* ---- Listen Together Sync Modal ---- */
+.sync-modal {
+  border: 1px solid var(--chrome-line);
+  border-radius: 8px;
+  padding: 0;
+  max-width: 420px;
+  width: 90vw;
+}
+
+.sync-modal::backdrop {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.sync-modal-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.sync-modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sync-modal-head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.sync-close-btn {
+  padding: 4px 10px;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.sync-qr-section {
+  text-align: center;
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.sync-qr-img {
+  border: 2px solid var(--chrome-line);
+  border-radius: 6px;
+}
+
+.sync-qr-url {
+  font-size: 0.75rem;
+  color: var(--text-soft);
+  word-break: break-all;
+  max-width: 100%;
+  margin: 0;
+}
+
+.sync-peers-section {
+  border-top: 1px solid var(--chrome-line);
+  padding-top: 12px;
+}
+
+.sync-peers-count {
+  margin: 0 0 6px;
+  font-size: 0.88rem;
+  color: var(--text-soft);
+}
+
+.sync-peers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sync-peers-list li {
+  padding: 4px 0;
+  font-size: 0.9rem;
+}
+
+.sync-status-section {
+  border-top: 1px solid var(--chrome-line);
+  padding-top: 8px;
+}
+
+.sync-status-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--accent-strong);
+}
+
+.sync-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+[data-sync-toggle].is-active {
+  background: linear-gradient(180deg, #d5e9fb, #a8d0f0);
+  border-color: #4d83bf;
+  color: #1f4f85;
+}

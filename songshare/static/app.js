@@ -3988,4 +3988,333 @@
     window.matchMedia('(max-width: 720px)').addEventListener('change', updateOverflowVisibility);
     updateOverflowVisibility();
   })();
+
+  (function bindListenTogether() {
+    var syncSocket = null;
+    var syncPeerId = null;
+    var syncConnected = false;
+    var syncEnabled = false;
+    var syncRoom = null;
+    var syncResyncTimer = null;
+    var syncPeers = {};
+    var syncIgnoreUntil = 0;
+
+    function initListenTogether() {
+      var syncBtn = document.createElement('button');
+      syncBtn.type = 'button';
+      syncBtn.className = 'frame-button transport-toggle';
+      syncBtn.setAttribute('data-sync-toggle', '');
+      syncBtn.innerHTML = '\u{1F3B5} Listen Together';
+      syncBtn.title = 'Sync playback with friends';
+
+      var transportControls = document.querySelector('.transport-controls');
+      if (transportControls) {
+        transportControls.parentNode.insertBefore(syncBtn, transportControls);
+      }
+
+      syncBtn.addEventListener('click', toggleListenTogether);
+    }
+
+    function toggleListenTogether() {
+      if (syncEnabled) {
+        disableSync();
+      } else {
+        showSyncDialog();
+      }
+    }
+
+    function showSyncDialog() {
+      var existing = document.getElementById('sync-modal');
+      if (existing) {
+        existing.showModal();
+        return;
+      }
+
+      var modal = document.createElement('dialog');
+      modal.id = 'sync-modal';
+      modal.className = 'sync-modal';
+
+      var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0].split('#')[0];
+      var joinUrl = window.location.origin + '/s/' + libraryId + '?sync=join';
+      var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(joinUrl);
+
+      modal.innerHTML = '<div class="sync-modal-card">' +
+        '<div class="sync-modal-head">' +
+          '<h2>\u{1F3B5} Listen Together</h2>' +
+          '<button type="button" class="frame-button sync-close-btn">&times;</button>' +
+        '</div>' +
+        '<div class="sync-qr-section">' +
+          '<p>Scan this QR code to join:</p>' +
+          '<img src="' + escapeHtml(qrUrl) + '" alt="QR code to join session" class="sync-qr-img" width="200" height="200">' +
+          '<p class="sync-qr-url">' + escapeHtml(joinUrl) + '</p>' +
+          '<button type="button" class="frame-button sync-copy-btn">Copy link</button>' +
+        '</div>' +
+        '<div class="sync-peers-section">' +
+          '<p class="sync-peers-count">No one else connected</p>' +
+          '<ul class="sync-peers-list" id="sync-peers-list"></ul>' +
+        '</div>' +
+        '<div class="sync-status-section">' +
+          '<p class="sync-status-text" id="sync-status-text">Not connected</p>' +
+        '</div>' +
+        '<div class="sync-modal-actions">' +
+          '<button type="button" class="frame-button primary sync-start-btn">Start Session</button>' +
+        '</div>' +
+      '</div>';
+
+      document.body.appendChild(modal);
+
+      modal.querySelector('.sync-close-btn').addEventListener('click', function () {
+        modal.close();
+      });
+
+      modal.querySelector('.sync-copy-btn').addEventListener('click', function () {
+        navigator.clipboard.writeText(joinUrl).then(function () {
+          this.textContent = 'Copied!';
+        }.bind(modal.querySelector('.sync-copy-btn')));
+      });
+
+      modal.querySelector('.sync-start-btn').addEventListener('click', function () {
+        enableSync(libraryId);
+        modal.querySelector('.sync-start-btn').textContent = 'Connected \u2713';
+        modal.querySelector('.sync-start-btn').disabled = true;
+        modal.querySelector('.sync-status-text').textContent = 'Session active \u2014 listening together';
+      });
+
+      modal.showModal();
+
+      if (window.location.search.indexOf('sync=join') !== -1) {
+        modal.querySelector('.sync-start-btn').click();
+      }
+    }
+
+    function enableSync(libraryId) {
+      syncRoom = 'sync:' + libraryId;
+      syncEnabled = true;
+
+      var btn = document.querySelector('[data-sync-toggle]');
+      if (btn) btn.classList.add('is-active');
+
+      if (typeof io === 'undefined') {
+        loadSocketIO(function () {
+          connectSocket(libraryId);
+        });
+      } else {
+        connectSocket(libraryId);
+      }
+    }
+
+    function loadSocketIO(callback) {
+      var script = document.createElement('script');
+      script.src = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+      script.onload = callback;
+      document.head.appendChild(script);
+    }
+
+    function connectSocket(libraryId) {
+      syncSocket = io({
+        transports: ['websocket', 'polling']
+      });
+
+      syncSocket.on('connect', function () {
+        syncConnected = true;
+        syncPeerId = syncSocket.id;
+        syncSocket.emit('join_session', { library_id: libraryId });
+        updateSyncStatus();
+        startResyncTimer();
+      });
+
+      syncSocket.on('joined', function (data) {
+        syncPeerId = data.peer_id;
+        updateSyncStatus();
+      });
+
+      syncSocket.on('peer_joined', function (data) {
+        syncPeers[data.peer_id] = Date.now();
+        updateSyncPeers();
+      });
+
+      syncSocket.on('peer_left', function (data) {
+        delete syncPeers[data.peer_id];
+        updateSyncPeers();
+      });
+
+      syncSocket.on('sync_action', function (data) {
+        if (data.peer_id === syncPeerId) return;
+        if (Date.now() < syncIgnoreUntil) return;
+        applyRemoteAction(data);
+      });
+
+      syncSocket.on('sync_state', function (data) {
+        if (data.peer_id === syncPeerId) return;
+        syncWithRemoteState(data);
+      });
+
+      syncSocket.on('disconnect', function () {
+        syncConnected = false;
+        updateSyncStatus();
+      });
+    }
+
+    function applyRemoteAction(data) {
+      if (!player) return;
+
+      switch (data.action) {
+        case 'play':
+          if (data.track_id) {
+            var row = findRowByTrackId(data.track_id);
+            if (row) selectRow(row, false);
+          }
+          if (player.src) {
+            if (typeof data.position === 'number' && data.position > 0) {
+              player.currentTime = data.position;
+            }
+            player.play().catch(function () {});
+          }
+          break;
+        case 'pause':
+          player.pause();
+          if (typeof data.position === 'number' && data.position > 0) {
+            player.currentTime = data.position;
+          }
+          break;
+        case 'seek':
+          if (typeof data.position === 'number' && data.position >= 0 && player.src) {
+            player.currentTime = data.position;
+          }
+          break;
+        case 'next':
+          if (nextButton) nextButton.click();
+          break;
+        case 'prev':
+          if (prevButton) prevButton.click();
+          break;
+      }
+    }
+
+    function syncWithRemoteState(data) {
+      if (!player || !player.src) return;
+
+      var currentTrack = trackStateFromRow(currentPlaybackRow());
+      if (!currentTrack || currentTrack.id !== data.track_id) return;
+
+      var diff = Math.abs(player.currentTime - (data.position || 0));
+      if (diff > 0.3) {
+        player.currentTime = data.position || 0;
+      }
+
+      if (data.playing && player.paused) {
+        player.play().catch(function () {});
+      } else if (!data.playing && !player.paused) {
+        player.pause();
+      }
+    }
+
+    function broadcastAction(action, extra) {
+      if (!syncSocket || !syncEnabled || !syncRoom) return;
+
+      var libId = syncRoom.replace('sync:', '');
+      var track = trackStateFromRow(currentPlaybackRow());
+      var trackId = track ? track.id : '';
+
+      var data = Object.assign({
+        library_id: libId,
+        action: action,
+        track_id: trackId,
+        position: player ? player.currentTime : 0
+      }, extra || {});
+
+      syncSocket.emit('sync_action', data);
+      syncIgnoreUntil = Date.now() + 500;
+    }
+
+    function startResyncTimer() {
+      if (syncResyncTimer) clearInterval(syncResyncTimer);
+      syncResyncTimer = setInterval(function () {
+        if (!syncSocket || !syncEnabled) return;
+        var libId = syncRoom ? syncRoom.replace('sync:', '') : '';
+        var track = trackStateFromRow(currentPlaybackRow());
+        syncSocket.emit('sync_state', {
+          library_id: libId,
+          action: 'state',
+          track_id: track ? track.id : '',
+          position: player ? player.currentTime : 0,
+          playing: player ? !player.paused : false
+        });
+      }, 5000);
+    }
+
+    function disableSync() {
+      syncEnabled = false;
+      if (syncResyncTimer) clearInterval(syncResyncTimer);
+      if (syncSocket) {
+        syncSocket.emit('leave_session', { library_id: syncRoom ? syncRoom.replace('sync:', '') : '' });
+        syncSocket.disconnect();
+        syncSocket = null;
+      }
+      syncPeers = {};
+
+      var btn = document.querySelector('[data-sync-toggle]');
+      if (btn) btn.classList.remove('is-active');
+
+      updateSyncPeers();
+      updateSyncStatus();
+    }
+
+    function updateSyncStatus() {
+      var el = document.getElementById('sync-status-text');
+      if (!el) return;
+      el.textContent = syncConnected ? 'Connected \u2014 ' + (Object.keys(syncPeers).length + 1) + ' listening' : 'Not connected';
+    }
+
+    function updateSyncPeers() {
+      var count = document.querySelector('.sync-peers-count');
+      var list = document.getElementById('sync-peers-list');
+      var peerCount = Object.keys(syncPeers).length;
+      if (count) count.textContent = peerCount + ' other' + (peerCount !== 1 ? 's' : '') + ' connected';
+      if (list) {
+        list.innerHTML = '';
+        Object.keys(syncPeers).forEach(function (id) {
+          var li = document.createElement('li');
+          li.textContent = '\u{1F464} Friend (' + id.slice(0, 8) + ')';
+          list.appendChild(li);
+        });
+      }
+    }
+
+    if (document.querySelector('.transport-band')) {
+      initListenTogether();
+
+      if (player) {
+        var origPlay = player.play;
+        player.play = function () {
+          var result = origPlay.call(player);
+          if (syncEnabled) broadcastAction('play');
+          return result;
+        };
+
+        var origPause = player.pause;
+        player.pause = function () {
+          if (syncEnabled) broadcastAction('pause');
+          return origPause.call(player);
+        };
+
+        if (progressInput) {
+          progressInput.addEventListener('change', function () {
+            if (syncEnabled) broadcastAction('seek', { position: player.currentTime });
+          });
+        }
+
+        if (nextButton) {
+          nextButton.addEventListener('click', function () {
+            if (syncEnabled) setTimeout(function () { broadcastAction('next'); }, 100);
+          });
+        }
+        if (prevButton) {
+          prevButton.addEventListener('click', function () {
+            if (syncEnabled) setTimeout(function () { broadcastAction('prev'); }, 100);
+          });
+        }
+      }
+    }
+  })();
 })();

@@ -4002,14 +4002,21 @@
     function initListenTogether() {
       var syncBtn = document.createElement('button');
       syncBtn.type = 'button';
-      syncBtn.className = 'frame-button transport-toggle';
+      syncBtn.className = 'frame-button';
       syncBtn.setAttribute('data-sync-toggle', '');
       syncBtn.innerHTML = '\u{1F3B5} Listen Together';
       syncBtn.title = 'Sync playback with friends';
+      syncBtn.style.whiteSpace = 'nowrap';
 
-      var transportControls = document.querySelector('.transport-controls');
-      if (transportControls) {
-        transportControls.parentNode.insertBefore(syncBtn, transportControls);
+      // Replace "Share access" link in title bar with this button
+      var titleActions = document.querySelector('.title-actions');
+      if (titleActions) {
+        var shareLink = titleActions.querySelector('a[href*="home"]');
+        if (shareLink) {
+          shareLink.parentNode.replaceChild(syncBtn, shareLink);
+        } else {
+          titleActions.appendChild(syncBtn);
+        }
       }
 
       syncBtn.addEventListener('click', toggleListenTogether);
@@ -4050,14 +4057,11 @@
           '<button type="button" class="frame-button sync-copy-btn">Copy link</button>' +
         '</div>' +
         '<div class="sync-peers-section">' +
-          '<p class="sync-peers-count">No one else connected</p>' +
+          '<p class="sync-peers-count">Connecting\u2026</p>' +
           '<ul class="sync-peers-list" id="sync-peers-list"></ul>' +
         '</div>' +
         '<div class="sync-status-section">' +
-          '<p class="sync-status-text" id="sync-status-text">Not connected</p>' +
-        '</div>' +
-        '<div class="sync-modal-actions">' +
-          '<button type="button" class="frame-button primary sync-start-btn">Start Session</button>' +
+          '<p class="sync-status-text" id="sync-status-text">Connecting\u2026</p>' +
         '</div>' +
       '</div>';
 
@@ -4073,18 +4077,14 @@
         }.bind(modal.querySelector('.sync-copy-btn')));
       });
 
-      modal.querySelector('.sync-start-btn').addEventListener('click', function () {
-        enableSync(libraryId);
-        modal.querySelector('.sync-start-btn').textContent = 'Connected \u2713';
-        modal.querySelector('.sync-start-btn').disabled = true;
-        modal.querySelector('.sync-status-text').textContent = 'Session active \u2014 listening together';
+      modal.addEventListener('close', function () {
+        disableSync();
       });
 
       modal.showModal();
 
-      if (window.location.search.indexOf('sync=join') !== -1) {
-        modal.querySelector('.sync-start-btn').click();
-      }
+      // Auto-connect immediately
+      enableSync(libraryId);
     }
 
     function enableSync(libraryId) {

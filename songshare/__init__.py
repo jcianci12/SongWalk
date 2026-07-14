@@ -1537,8 +1537,47 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         return redirect(url_for("view_library", library_id=library_id))
 
-    @app.get("/email/test/<owner_token>")
-    def email_test_send(owner_token: str):
+    @app.post("/api/import/cookies")
+    def upload_youtube_cookies():
+        """Accept a cookies.txt file and save it to the data directory."""
+        uploaded = request.files.get("cookies")
+        if not uploaded or not uploaded.filename:
+            if wants_json():
+                return jsonify({"ok": False, "error": "No cookies file provided."}), 400
+            return redirect(url_for("home", error="No cookies file provided."))
+
+        cookies_path = app.config["DATA_DIR"] / "cookies.txt"
+        uploaded.save(str(cookies_path))
+
+        # Validate it looks like a cookies file
+        first_line = (
+            cookies_path.read_text(encoding="utf-8", errors="replace")
+            .split("\n")[0]
+            .strip()
+        )
+        if not first_line.startswith("#"):
+            cookies_path.unlink(missing_ok=True)
+            if wants_json():
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "Invalid cookies file. Must be Netscape format — first line should start with #.",
+                    }
+                ), 400
+            return redirect(
+                url_for(
+                    "home", error="Invalid cookies file. Export in Netscape format."
+                )
+            )
+
+        if wants_json():
+            return jsonify(
+                {
+                    "ok": True,
+                    "message": "YouTube cookies updated. Imports should work now.",
+                }
+            )
+        return redirect(url_for("home", notice="YouTube cookies updated."))
         if owner_token != app.config["OWNER_TOKEN"]:
             abort(404)
 

@@ -218,6 +218,27 @@
             <div class="empty-table">No tracks yet. Import something to populate the library.</div>
           {% endif %}
         </section>
+
+        <section class="import-card">
+          <div class="import-card-head">
+            <div>
+              <p class="dock-label">YouTube Setup</p>
+              <h2>Import Cookies</h2>
+            </div>
+          </div>
+          <p>YouTube requires browser cookies to bypass bot detection. Export your cookies once and upload them here — all library users benefit.</p>
+          <ol style="margin: 0 0 12px; padding-left: 18px; font-size: 0.9rem;">
+            <li>Install <a href="https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" rel="noopener">Get cookies.txt LOCALLY</a> (Chrome) or <a href="https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/" target="_blank" rel="noopener">cookies.txt</a> (Firefox)</li>
+            <li>Visit <a href="https://www.youtube.com" target="_blank" rel="noopener">youtube.com</a> and sign in</li>
+            <li>Click the extension icon → Export cookies.txt</li>
+            <li>Upload the file below</li>
+          </ol>
+          <form class="import-stack" method="post" action="/api/import/cookies" enctype="multipart/form-data">
+            <input type="file" name="cookies" accept=".txt" required>
+            <button type="submit" class="frame-button primary">Upload cookies.txt</button>
+          </form>
+          <p style="margin-top: 8px; font-size: 0.8rem; color: var(--text-soft);">Cookies last several weeks. Re-upload when YouTube imports start failing again.</p>
+        </section>
       </main>
     </div>
 

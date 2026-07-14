@@ -33,10 +33,10 @@ steps:
       - docker network connect songwalk_default nginx-app-1 2>/dev/null || echo "(already connected)"
     environment:
       SONGSHARE_PUBLISHED_PORT: "18080"
-      SONGWALK_SMTP_USERNAME: "jon@tekonline.com.au"
+      SONGWALK_SMTP_USERNAME: "noreply@tekonline.com.au"
       SONGWALK_SMTP_PASSWORD:
         from_secret: songwalk_smtp_password
-      SONGWALK_SMTP_FROM: "jon@tekonline.com.au"
+      SONGWALK_SMTP_FROM: "noreply@tekonline.com.au"
 
 volumes:
   - name: docker-socket

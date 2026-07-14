@@ -105,13 +105,19 @@ class LibraryImportService:
         self._work_root = Path(work_root or store.root_dir / ".import-work")
         self._youtube_command = youtube_command.strip() if youtube_command else ""
         self._spotify_command = spotify_command.strip() if spotify_command else ""
-        self._spotify_client_id = (spotify_client_id or os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "")).strip()
-        self._spotify_client_secret = (spotify_client_secret or os.getenv("SONGSHARE_SPOTIFY_CLIENT_SECRET", "")).strip()
+        self._spotify_client_id = (
+            spotify_client_id or os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "")
+        ).strip()
+        self._spotify_client_secret = (
+            spotify_client_secret or os.getenv("SONGSHARE_SPOTIFY_CLIENT_SECRET", "")
+        ).strip()
         self._spotify_access_token = ""
         self._spotify_access_token_expires_at = 0.0
         self._work_root.mkdir(parents=True, exist_ok=True)
 
-    def import_uploaded_files(self, library_id: str, uploads: Iterable[UploadedTrack]) -> ImportOutcome:
+    def import_uploaded_files(
+        self, library_id: str, uploads: Iterable[UploadedTrack]
+    ) -> ImportOutcome:
         outcome = ImportOutcome()
         for upload in uploads:
             try:
@@ -184,10 +190,13 @@ class LibraryImportService:
             items.append(
                 {
                     "title": str(payload.get("title", "")).strip() or "Untitled result",
-                    "channel": str(payload.get("channel", "") or payload.get("uploader", "")).strip(),
+                    "channel": str(
+                        payload.get("channel", "") or payload.get("uploader", "")
+                    ).strip(),
                     "duration": _format_duration(duration_seconds),
                     "thumbnail": _best_thumbnail_url(payload),
-                    "url": str(payload.get("webpage_url", "")).strip() or f"https://www.youtube.com/watch?v={video_id}",
+                    "url": str(payload.get("webpage_url", "")).strip()
+                    or f"https://www.youtube.com/watch?v={video_id}",
                 }
             )
 
@@ -198,7 +207,9 @@ class LibraryImportService:
         if len(clean_query) < 2:
             raise ImportError("Enter at least two characters to search Spotify.")
         if not self._spotify_client_id or not self._spotify_client_secret:
-            raise ImportError("Spotify search requires SONGSHARE_SPOTIFY_CLIENT_ID and SONGSHARE_SPOTIFY_CLIENT_SECRET.")
+            raise ImportError(
+                "Spotify search requires SONGSHARE_SPOTIFY_CLIENT_ID and SONGSHARE_SPOTIFY_CLIENT_SECRET."
+            )
 
         payload = self._spotify_request_json(
             "https://api.spotify.com/v1/search",
@@ -218,9 +229,15 @@ class LibraryImportService:
                 {
                     "kind": "track",
                     "title": str(track.get("name", "")).strip() or "Untitled track",
-                    "subtitle": " · ".join(part for part in (artist_names, album_name) if part),
-                    "thumbnail": _spotify_image_url((track.get("album") or {}).get("images")),
-                    "url": str((track.get("external_urls") or {}).get("spotify", "")).strip(),
+                    "subtitle": " · ".join(
+                        part for part in (artist_names, album_name) if part
+                    ),
+                    "thumbnail": _spotify_image_url(
+                        (track.get("album") or {}).get("images")
+                    ),
+                    "url": str(
+                        (track.get("external_urls") or {}).get("spotify", "")
+                    ).strip(),
                 }
             )
 
@@ -230,21 +247,32 @@ class LibraryImportService:
                 {
                     "kind": "album",
                     "title": str(album.get("name", "")).strip() or "Untitled album",
-                    "subtitle": " · ".join(part for part in (artist_names, "Album") if part),
+                    "subtitle": " · ".join(
+                        part for part in (artist_names, "Album") if part
+                    ),
                     "thumbnail": _spotify_image_url(album.get("images")),
-                    "url": str((album.get("external_urls") or {}).get("spotify", "")).strip(),
+                    "url": str(
+                        (album.get("external_urls") or {}).get("spotify", "")
+                    ).strip(),
                 }
             )
 
         for playlist in (payload.get("playlists") or {}).get("items", []):
-            owner_name = str((playlist.get("owner") or {}).get("display_name", "")).strip()
+            owner_name = str(
+                (playlist.get("owner") or {}).get("display_name", "")
+            ).strip()
             items.append(
                 {
                     "kind": "playlist",
-                    "title": str(playlist.get("name", "")).strip() or "Untitled playlist",
-                    "subtitle": " · ".join(part for part in (owner_name, "Playlist") if part),
+                    "title": str(playlist.get("name", "")).strip()
+                    or "Untitled playlist",
+                    "subtitle": " · ".join(
+                        part for part in (owner_name, "Playlist") if part
+                    ),
                     "thumbnail": _spotify_image_url(playlist.get("images")),
-                    "url": str((playlist.get("external_urls") or {}).get("spotify", "")).strip(),
+                    "url": str(
+                        (playlist.get("external_urls") or {}).get("spotify", "")
+                    ).strip(),
                 }
             )
 
@@ -263,11 +291,15 @@ class LibraryImportService:
 
         with tempfile.TemporaryDirectory(dir=self._work_root) as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            _emit_progress(progress_callback, phase="preparing", message="Preparing import...")
+            _emit_progress(
+                progress_callback, phase="preparing", message="Preparing import..."
+            )
             result = self._command_runner.run(
                 command,
                 cwd=temp_dir,
-                progress_callback=lambda line: self._handle_remote_progress_line(line, progress_callback),
+                progress_callback=lambda line: self._handle_remote_progress_line(
+                    line, progress_callback
+                ),
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout or "").strip()
@@ -278,7 +310,8 @@ class LibraryImportService:
             produced_files = [
                 file_path
                 for file_path in sorted(temp_dir.rglob("*"))
-                if file_path.is_file() and file_path.suffix.lower() in ALLOWED_AUDIO_EXTENSIONS
+                if file_path.is_file()
+                and file_path.suffix.lower() in ALLOWED_AUDIO_EXTENSIONS
             ]
 
             total_files = len(produced_files)
@@ -288,7 +321,9 @@ class LibraryImportService:
                     progress_callback,
                     phase="tagging",
                     message=f"Adding track {index} of {total_files} to the library...",
-                    percent=100 if total_files == 0 else min(99, int((index - 1) / total_files * 100)),
+                    percent=100
+                    if total_files == 0
+                    else min(99, int((index - 1) / total_files * 100)),
                     current_item=item_label,
                 )
 
@@ -297,7 +332,8 @@ class LibraryImportService:
                         library_id,
                         UploadedTrack(
                             filename=file_path.name,
-                            content_type=mimetypes.guess_type(file_path.name)[0] or "application/octet-stream",
+                            content_type=mimetypes.guess_type(file_path.name)[0]
+                            or "application/octet-stream",
                             stream=handle,
                             size=file_path.stat().st_size,
                         ),
@@ -306,7 +342,9 @@ class LibraryImportService:
                     progress_callback,
                     phase="tagging",
                     message=f"Matching metadata for {track.title or item_label}...",
-                    percent=100 if total_files == 0 else min(99, int(index / total_files * 100)),
+                    percent=100
+                    if total_files == 0
+                    else min(99, int(index / total_files * 100)),
                     current_item=track.title or item_label,
                 )
                 finalized = self._finalize_track(library_id, track)
@@ -316,14 +354,23 @@ class LibraryImportService:
             if not outcome.uploaded:
                 outcome.errors.append("No supported audio files were produced.")
             else:
-                _emit_progress(progress_callback, phase="complete", message="Import finished.", percent=100)
+                _emit_progress(
+                    progress_callback,
+                    phase="complete",
+                    message="Import finished.",
+                    percent=100,
+                )
             return outcome
 
     def _finalize_track(self, library_id: str, track: Track) -> Track:
         track = self._normalize_track_metadata(library_id, track)
 
-        present_fields = sum(bool(value.strip()) for value in (track.title, track.artist, track.album))
-        if present_fields < 2 or all(value.strip() for value in (track.title, track.artist, track.album)):
+        present_fields = sum(
+            bool(value.strip()) for value in (track.title, track.artist, track.album)
+        )
+        if present_fields < 2 or all(
+            value.strip() for value in (track.title, track.artist, track.album)
+        ):
             return track
 
         try:
@@ -389,6 +436,7 @@ class LibraryImportService:
             binary_fallbacks=(["yt-dlp"], ["youtube-dl"]),
         )
         ffmpeg_args = _resolve_ffmpeg_args("--ffmpeg-location")
+        cookies_arg = self._build_cookies_arg()
         return prefix + [
             "--ignore-config",
             "--extract-audio",
@@ -397,6 +445,7 @@ class LibraryImportService:
             "--restrict-filenames",
             "-o",
             "%(uploader)s - %(title)s [%(id)s].%(ext)s",
+            *cookies_arg,
             *ffmpeg_args,
             source_url.strip(),
         ]
@@ -407,13 +456,27 @@ class LibraryImportService:
             module_fallbacks=("yt_dlp", "youtube_dl"),
             binary_fallbacks=(["yt-dlp"], ["youtube-dl"]),
         )
+        cookies_arg = self._build_cookies_arg()
         return prefix + [
             "--ignore-config",
             "--flat-playlist",
             "--dump-json",
             "--no-warnings",
+            *cookies_arg,
             f"ytsearch{max(1, min(limit, 10))}:{query}",
         ]
+
+    @staticmethod
+    def _build_cookies_arg() -> list[str]:
+        cookies_path = os.getenv("SONGWALK_YOUTUBE_COOKIES", "").strip()
+        if cookies_path and os.path.isfile(cookies_path):
+            return ["--cookies", cookies_path]
+        # Also check the data dir for a cookies.txt file
+        data_dir = os.getenv("SONGSHARE_DATA_DIR", "./songshare-data")
+        fallback = os.path.join(data_dir, "cookies.txt")
+        if os.path.isfile(fallback):
+            return ["--cookies", fallback]
+        return []
 
     def _build_spotify_command(self, source_url: str) -> list[str]:
         prefix = _resolve_command(
@@ -495,7 +558,9 @@ class LibraryImportService:
         auth_value = base64.b64encode(
             f"{self._spotify_client_id}:{self._spotify_client_secret}".encode("utf-8")
         ).decode("ascii")
-        body = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode("utf-8")
+        body = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode(
+            "utf-8"
+        )
         request = urllib.request.Request(
             "https://accounts.spotify.com/api/token",
             data=body,
@@ -551,7 +616,9 @@ def _resolve_ffmpeg_args(flag_name: str) -> list[str]:
     try:
         from imageio_ffmpeg import get_ffmpeg_exe
     except Exception as exc:
-        raise ImportError("FFmpeg is required for YouTube and Spotify imports.") from exc
+        raise ImportError(
+            "FFmpeg is required for YouTube and Spotify imports."
+        ) from exc
 
     return [flag_name, get_ffmpeg_exe()]
 

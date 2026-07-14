@@ -4011,7 +4011,15 @@
       // Replace "Share access" link in title bar with this button
       var titleActions = document.querySelector('.title-actions');
       if (titleActions) {
-        var shareLink = titleActions.querySelector('a[href*="home"]');
+        // Find "Share access" by text content (href varies: / on prod, / on dev)
+        var links = titleActions.querySelectorAll('a.frame-button');
+        var shareLink = null;
+        for (var i = 0; i < links.length; i++) {
+          if ((links[i].textContent || '').trim() === 'Share access') {
+            shareLink = links[i];
+            break;
+          }
+        }
         if (shareLink) {
           shareLink.parentNode.replaceChild(syncBtn, shareLink);
         } else {

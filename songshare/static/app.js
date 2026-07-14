@@ -3939,7 +3939,7 @@
       shareLink.setAttribute('data-sync-toggle', '');
       shareLink.addEventListener('click', function (e) {
         e.preventDefault();
-        toggleListenTogether();
+        if (window.__songwalkToggleSync) window.__songwalkToggleSync();
       });
     }
   })();
@@ -4035,12 +4035,14 @@
 
     function toggleListenTogether() {
       if (syncEnabled) {
-        // Already synced — just show the dialog to view peers
         showSyncDialog();
       } else {
         showSyncDialog();
       }
     }
+
+    // Expose for the initListenTogether IIFE
+    window.__songwalkToggleSync = toggleListenTogether;
 
     function showSyncDialog() {
       var existing = document.getElementById('sync-modal');

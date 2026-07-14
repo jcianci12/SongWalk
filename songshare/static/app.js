@@ -4034,6 +4034,9 @@
       var existing = document.getElementById('sync-modal');
       if (existing) {
         existing.showModal();
+        // Reconnect if not already connected
+        var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0].split('#')[0];
+        if (!syncEnabled) enableSync(libraryId);
         return;
       }
 
@@ -4293,6 +4296,11 @@
 
     if (document.querySelector('.transport-band')) {
       initListenTogether();
+
+      // Auto-join from URL param (e.g. QR code scan)
+      if (window.location.search.indexOf('sync=join') !== -1) {
+        showSyncDialog();
+      }
 
       if (player) {
         var origPlay = player.play;

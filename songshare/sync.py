@@ -1,11 +1,26 @@
 from __future__ import annotations
 
 import time
+from collections import defaultdict
 
 from flask import request
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 
 socketio = SocketIO()
+
+# Track peers per sync room: { "sync:<library_id>": {sid, sid, ...} }
+_room_peers: dict[str, set[str]] = defaultdict(set)
+
+
+def _room_for(library_id: str) -> str:
+    return f"sync:{library_id}"
+
+
+def _peers_in_room(room: str, *, exclude: str | None = None) -> list[str]:
+    peers = list(_room_peers.get(room, set()))
+    if exclude and exclude in peers:
+        peers.remove(exclude)
+    return peers
 
 
 def init_sync(app):
@@ -20,25 +35,36 @@ def init_sync(app):
         library_id = data.get("library_id", "").strip()
         if not library_id:
             return
-        room = f"sync:{library_id}"
+        room = _room_for(library_id)
         join_room(room)
-        peer_id = request.sid
+        sid = request.sid
+        _room_peers[room].add(sid)
+
+        # Tell everyone (including the joiner) about the new peer
+        peer_count = len(_room_peers[room])
         emit(
             "peer_joined",
-            {"peer_id": peer_id, "action": "peer_joined"},
+            {"peer_id": sid, "peer_count": peer_count, "peers": _peers_in_room(room)},
             to=room,
-            include_self=False,
         )
-        emit("joined", {"peer_id": peer_id, "room": room})
 
     @socketio.on("leave_session")
     def handle_leave(data):
         library_id = data.get("library_id", "").strip()
         if not library_id:
             return
-        room = f"sync:{library_id}"
+        room = _room_for(library_id)
         leave_room(room)
-        emit("peer_left", {"peer_id": request.sid, "action": "peer_left"}, to=room)
+        sid = request.sid
+        _room_peers[room].discard(sid)
+        if not _room_peers[room]:
+            del _room_peers[room]
+        peer_count = len(_room_peers.get(room, set()))
+        emit(
+            "peer_left",
+            {"peer_id": sid, "peer_count": peer_count, "peers": _peers_in_room(room)},
+            to=room,
+        )
 
     @socketio.on("sync_action")
     def handle_sync_action(data):
@@ -46,7 +72,7 @@ def init_sync(app):
         action = data.get("action", "").strip()
         if not library_id or not action:
             return
-        room = f"sync:{library_id}"
+        room = _room_for(library_id)
         data["peer_id"] = request.sid
         data["timestamp"] = time.time()
         emit("sync_action", data, to=room, include_self=False)
@@ -56,17 +82,27 @@ def init_sync(app):
         library_id = data.get("library_id", "").strip()
         if not library_id:
             return
-        room = f"sync:{library_id}"
+        room = _room_for(library_id)
         data["peer_id"] = request.sid
         data["timestamp"] = time.time()
         emit("sync_state", data, to=room, include_self=False)
 
     @socketio.on("disconnect")
     def handle_disconnect():
-        for room_name in rooms():
+        sid = request.sid
+        for room_name in list(rooms()):
             if room_name.startswith("sync:"):
+                leave_room(room_name)
+                _room_peers[room_name].discard(sid)
+                if not _room_peers[room_name]:
+                    del _room_peers[room_name]
+                peer_count = len(_room_peers.get(room_name, set()))
                 emit(
                     "peer_left",
-                    {"peer_id": request.sid, "action": "peer_left"},
+                    {
+                        "peer_id": sid,
+                        "peer_count": peer_count,
+                        "peers": _peers_in_room(room_name),
+                    },
                     to=room_name,
                 )

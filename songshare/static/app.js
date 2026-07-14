@@ -4129,13 +4129,22 @@
       });
 
       syncSocket.on('peer_joined', function (data) {
-        syncPeers[data.peer_id] = Date.now();
+        // Rebuild full peer list from server (excludes self)
+        syncPeers = {};
+        (data.peers || []).forEach(function (pid) {
+          if (pid !== syncPeerId) syncPeers[pid] = Date.now();
+        });
         updateSyncPeers();
+        updateSyncStatus();
       });
 
       syncSocket.on('peer_left', function (data) {
-        delete syncPeers[data.peer_id];
+        syncPeers = {};
+        (data.peers || []).forEach(function (pid) {
+          if (pid !== syncPeerId) syncPeers[pid] = Date.now();
+        });
         updateSyncPeers();
+        updateSyncStatus();
       });
 
       syncSocket.on('sync_action', function (data) {
@@ -4263,7 +4272,8 @@
     function updateSyncStatus() {
       var el = document.getElementById('sync-status-text');
       if (!el) return;
-      el.textContent = syncConnected ? 'Connected \u2014 ' + (Object.keys(syncPeers).length + 1) + ' listening' : 'Not connected';
+      var total = Object.keys(syncPeers).length + 1; // + self
+      el.textContent = syncConnected ? 'Connected \u2014 ' + total + ' listening' : 'Not connected';
     }
 
     function updateSyncPeers() {

@@ -4024,7 +4024,8 @@
 
     function toggleListenTogether() {
       if (syncEnabled) {
-        disableSync();
+        // Already synced — just show the dialog to view peers
+        showSyncDialog();
       } else {
         showSyncDialog();
       }
@@ -4066,13 +4067,12 @@
         '<div class="sync-status-section">' +
           '<p class="sync-status-text" id="sync-status-text">Connecting\u2026</p>' +
         '</div>' +
+        '<div class="sync-modal-actions">' +
+          '<button type="button" class="frame-button danger sync-leave-btn">Leave Session</button>' +
+        '</div>' +
       '</div>';
 
       document.body.appendChild(modal);
-
-      modal.querySelector('.sync-close-btn').addEventListener('click', function () {
-        modal.close();
-      });
 
       modal.querySelector('.sync-copy-btn').addEventListener('click', function () {
         navigator.clipboard.writeText(joinUrl).then(function () {
@@ -4080,8 +4080,17 @@
         }.bind(modal.querySelector('.sync-copy-btn')));
       });
 
-      modal.addEventListener('close', function () {
+      // Close button just hides the dialog — session keeps running
+      modal.querySelector('.sync-close-btn').addEventListener('click', function () {
+        modal.close();
+      });
+
+      // Leave session button fully disconnects
+      modal.querySelector('.sync-leave-btn').addEventListener('click', function () {
         disableSync();
+        modal.close();
+        // Reset dialog to fresh state
+        modal.remove();
       });
 
       modal.showModal();

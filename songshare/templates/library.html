@@ -374,6 +374,15 @@
                             {% endif %}
                             <p>{{ group.tracks|length }} track{% if group.tracks|length != 1 %}s{% endif %}</p>
                           </div>
+                          <button
+                            type="button"
+                            class="album-delete-btn"
+                            data-delete-album
+                            data-album-track-ids="{{ group.track_ids|join(',') }}"
+                            data-album-name="{{ group.name }}"
+                            title="Delete album &quot;{{ group.name }}&quot;"
+                            aria-label="Delete album {{ group.name }}"
+                          >&times;</button>
                         </div>
 
                         <div class="track-stack">

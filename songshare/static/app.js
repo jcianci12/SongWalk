@@ -4361,4 +4361,45 @@
       }
     }
   })();
+
+  // ---- Album delete buttons ----
+  (function bindAlbumDeleteButtons() {
+    document.querySelectorAll('[data-delete-album]').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        var albumName = btn.getAttribute('data-album-name') || 'this album';
+        var trackIds = (btn.getAttribute('data-album-track-ids') || '').split(',').filter(Boolean);
+        if (!trackIds.length) return;
+        if (!window.confirm('Delete album "' + albumName + '" and all ' + trackIds.length + ' tracks?')) return;
+
+        var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0];
+        var deleteUrl = '/s/' + libraryId + '/tracks/delete';
+
+        btn.disabled = true;
+        btn.textContent = '...';
+        try {
+          var formData = new FormData();
+          trackIds.forEach(function (id) { formData.append('track_ids', id); });
+          var response = await fetch(deleteUrl, {
+            method: 'POST',
+            body: formData,
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' }
+          });
+          if (response.ok) {
+            // Remove album section from DOM for instant feedback
+            var section = btn.closest('[data-album-section]');
+            if (section) section.remove();
+            // Also trigger library refresh
+            await refreshLibraryAfterMutation({
+              selectedTrackIds: [],
+              selectedTrackId: '',
+              selectionAnchorId: '',
+              deletedTrackIds: trackIds
+            });
+          }
+        } catch (_) {}
+        btn.disabled = false;
+        btn.textContent = '\u00d7';
+      });
+    });
+  })();
 })();

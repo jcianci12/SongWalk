@@ -2592,3 +2592,65 @@ audio {
   border-color: #4d83bf;
   color: #1f4f85;
 }
+
+/* ---- Drag handle ---- */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 4px;
+  cursor: grab;
+  color: var(--text-soft);
+  font-size: 1rem;
+  user-select: none;
+  flex-shrink: 0;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.track-row:hover .drag-handle,
+.track-row.is-drag-source .drag-handle {
+  opacity: 1;
+  color: var(--accent-strong);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* ---- Album delete button ---- */
+.album-delete-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.album-summary {
+  position: relative;
+}
+
+.album-summary:hover .album-delete-btn {
+  opacity: 1;
+}
+
+.album-delete-btn:hover {
+  background: #fce4e4;
+  border-color: #e0b4b4;
+  color: #c0392b;
+}

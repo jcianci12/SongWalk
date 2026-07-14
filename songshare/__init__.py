@@ -42,7 +42,7 @@ from .store import (
     TrackNotFoundError,
     UploadedTrack,
 )
-from .sync import init_sync, socketio
+from .sync import broadcast_library_change, init_sync, socketio
 
 
 @dataclass
@@ -1106,6 +1106,11 @@ def create_app(test_config: dict | None = None) -> Flask:
             for file in files:
                 file.close()
 
+        if outcome.uploaded:
+            broadcast_library_change(
+                library_id, "track_added", {"count": outcome.uploaded}
+            )
+
         notice = (
             f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''}."
         )
@@ -1149,11 +1154,19 @@ def create_app(test_config: dict | None = None) -> Flask:
                 outcome = app.config["IMPORT_SERVICE"].import_youtube_url(
                     library_id, source_url
                 )
+                if outcome.uploaded:
+                    broadcast_library_change(
+                        library_id, "track_added", {"count": outcome.uploaded}
+                    )
                 notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from YouTube."
             elif source == "spotify":
                 outcome = app.config["IMPORT_SERVICE"].import_spotify_url(
                     library_id, source_url
                 )
+                if outcome.uploaded:
+                    broadcast_library_change(
+                        library_id, "track_added", {"count": outcome.uploaded}
+                    )
                 notice = f"Imported {outcome.uploaded} track{'s' if outcome.uploaded != 1 else ''} from Spotify."
             else:
                 abort(404)
@@ -1182,6 +1195,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
 
+        broadcast_library_change(library_id, "track_updated", {"track_id": track_id})
+
         if wants_json():
             return jsonify({"ok": True})
 
@@ -1197,6 +1212,8 @@ def create_app(test_config: dict | None = None) -> Flask:
             store.delete_track(library_id, track_id)
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
+
+        broadcast_library_change(library_id, "track_deleted", {"track_id": track_id})
 
         if wants_json():
             return jsonify({"ok": True})
@@ -1214,6 +1231,10 @@ def create_app(test_config: dict | None = None) -> Flask:
             track = store.set_track_rating(library_id, track_id, rating=rating)
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
+
+        broadcast_library_change(
+            library_id, "track_updated", {"track_id": track.id, "rating": track.rating}
+        )
 
         return jsonify({"ok": True, "track": {"id": track.id, "rating": track.rating}})
 
@@ -1240,6 +1261,17 @@ def create_app(test_config: dict | None = None) -> Flask:
             )
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
+
+        if moved_tracks:
+            broadcast_library_change(
+                library_id,
+                "tracks_reordered",
+                {
+                    "track_ids": [t.id for t in moved_tracks],
+                    "album": album,
+                    "artist": artist,
+                },
+            )
 
         target_album_key = album_group_key(album, artist)
         notice = f"Moved {len(moved_tracks)} track{'s' if len(moved_tracks) != 1 else ''} to {album}."
@@ -1298,6 +1330,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
 
+        broadcast_library_change(library_id, "track_deleted", {"track_id": track_id})
+        broadcast_library_change(target_library_id, "track_added", {"count": 1})
+
         redirect_url = url_for(
             "view_library",
             library_id=target_library_id,
@@ -1337,11 +1372,53 @@ def create_app(test_config: dict | None = None) -> Flask:
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
 
+        if deleted:
+            broadcast_library_change(
+                library_id, "track_deleted", {"count": deleted, "track_ids": track_ids}
+            )
+
         if wants_json():
             return jsonify({"ok": True, "deleted": deleted})
 
         notice = f"Removed {deleted} track{'s' if deleted != 1 else ''}."
         return redirect(url_for("view_library", library_id=library_id, notice=notice))
+
+    @app.post("/s/<library_id>/tracks/reorder")
+    def reorder_tracks(library_id: str):
+        payload = request.get_json(silent=True) or {}
+        track_ids = payload.get("track_ids", [])
+        if not isinstance(track_ids, list) or not track_ids:
+            return jsonify(
+                {"ok": False, "error": "track_ids must be a non-empty list."}
+            ), 400
+
+        try:
+            ordered = store.reorder_tracks(
+                library_id, [str(track_id) for track_id in track_ids]
+            )
+        except (LibraryNotFoundError, TrackNotFoundError):
+            abort(404)
+
+        broadcast_library_change(
+            library_id,
+            "tracks_reordered",
+            {"track_ids": [t.id for t in ordered]},
+        )
+
+        if wants_json():
+            return jsonify(
+                {
+                    "ok": True,
+                    "reordered": len(ordered),
+                    "track_ids": [t.id for t in ordered],
+                }
+            )
+
+        return redirect(
+            url_for(
+                "view_library", library_id=library_id, notice="Track order updated."
+            )
+        )
 
     @app.get("/s/<library_id>/tracks/<track_id>/file")
     def stream_track(library_id: str, track_id: str):
@@ -1444,6 +1521,10 @@ def create_app(test_config: dict | None = None) -> Flask:
             return jsonify({"ok": False, "error": str(exc)}), 400
         except (LibraryNotFoundError, TrackNotFoundError):
             abort(404)
+
+        broadcast_library_change(
+            library_id, "track_updated", {"track_id": updated_track.id}
+        )
 
         return jsonify(
             {

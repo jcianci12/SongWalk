@@ -4174,6 +4174,21 @@
         syncWithRemoteState(data);
       });
 
+      syncSocket.on('library_changed', function (data) {
+        if (data.peer_id === syncPeerId) return;
+        if (!data.library_id || !syncRoom) return;
+        var ourLibId = syncRoom.replace('sync:', '');
+        if (data.library_id !== ourLibId) return;
+
+        var opts = {};
+        if (data.event === 'track_deleted' && data.payload) {
+          var ids = data.payload.track_ids || [];
+          if (!ids.length && data.payload.track_id) ids = [data.payload.track_id];
+          opts.deletedTrackIds = ids;
+        }
+        refreshLibraryAfterMutation(opts);
+      });
+
       syncSocket.on('disconnect', function () {
         syncConnected = false;
         updateSyncStatus();

@@ -83,7 +83,9 @@ class Track:
             rating=payload.get("rating", 0),
             cover_art_name=payload.get("cover_art_name", ""),
             musicbrainz_release_id=payload.get("musicbrainz_release_id", ""),
-            musicbrainz_release_group_id=payload.get("musicbrainz_release_group_id", ""),
+            musicbrainz_release_group_id=payload.get(
+                "musicbrainz_release_group_id", ""
+            ),
         )
 
     def to_dict(self) -> dict:
@@ -137,7 +139,9 @@ class Library:
             created_at=datetime.fromisoformat(payload["created_at"]),
             updated_at=datetime.fromisoformat(payload["updated_at"]),
             name=payload.get("name", ""),
-            collections=[Collection.from_dict(item) for item in payload.get("collections", [])],
+            collections=[
+                Collection.from_dict(item) for item in payload.get("collections", [])
+            ],
             tracks=[Track.from_dict(item) for item in payload.get("tracks", [])],
         )
 
@@ -187,7 +191,9 @@ class Store:
                 files_dir = library_dir / "files"
                 files_dir.mkdir(parents=True, exist_ok=False)
                 now = _now()
-                library = Library(id=library_id, created_at=now, updated_at=now, name=name.strip())
+                library = Library(
+                    id=library_id, created_at=now, updated_at=now, name=name.strip()
+                )
                 self._write_library(library)
                 return library
         raise RuntimeError("unable to allocate library id")
@@ -200,7 +206,9 @@ class Store:
             self._write_library(library)
             return library
 
-    def create_collection(self, library_id: str, *, name: str, track_ids: list[str]) -> Collection:
+    def create_collection(
+        self, library_id: str, *, name: str, track_ids: list[str]
+    ) -> Collection:
         with self._lock:
             library = self.get_library(library_id)
             normalized_name = name.strip()
@@ -225,7 +233,9 @@ class Store:
             self._write_library(library)
             return collection
 
-    def add_tracks_to_collection(self, library_id: str, collection_id: str, *, track_ids: list[str]) -> Collection:
+    def add_tracks_to_collection(
+        self, library_id: str, collection_id: str, *, track_ids: list[str]
+    ) -> Collection:
         with self._lock:
             library = self.get_library(library_id)
             collection = self._find_collection(library, collection_id)
@@ -233,22 +243,30 @@ class Store:
             if not selected_track_ids:
                 raise ValueError("Choose at least one album to group.")
 
-            self._remove_track_ids_from_collections_locked(library, selected_track_ids, except_collection_id=collection_id)
-            collection.track_ids = _unique_strings([*collection.track_ids, *selected_track_ids])
+            self._remove_track_ids_from_collections_locked(
+                library, selected_track_ids, except_collection_id=collection_id
+            )
+            collection.track_ids = _unique_strings(
+                [*collection.track_ids, *selected_track_ids]
+            )
             collection.updated_at = _now()
             library.updated_at = collection.updated_at
             self._prune_empty_collections_locked(library)
             self._write_library(library)
             return collection
 
-    def remove_tracks_from_collections(self, library_id: str, *, track_ids: list[str]) -> int:
+    def remove_tracks_from_collections(
+        self, library_id: str, *, track_ids: list[str]
+    ) -> int:
         with self._lock:
             library = self.get_library(library_id)
             selected_track_ids = self._normalize_track_ids(library, track_ids)
             if not selected_track_ids:
                 return 0
 
-            removed = self._remove_track_ids_from_collections_locked(library, selected_track_ids)
+            removed = self._remove_track_ids_from_collections_locked(
+                library, selected_track_ids
+            )
             if removed:
                 library.updated_at = _now()
                 self._write_library(library)
@@ -291,7 +309,11 @@ class Store:
             with target_path.open("wb") as handle:
                 shutil.copyfileobj(stream, handle)
 
-            size = uploaded_track.size if uploaded_track.size and uploaded_track.size > 0 else target_path.stat().st_size
+            size = (
+                uploaded_track.size
+                if uploaded_track.size and uploaded_track.size > 0
+                else target_path.stat().st_size
+            )
             content_type = (
                 uploaded_track.content_type
                 or mimetypes.guess_type(filename)[0]
@@ -308,7 +330,8 @@ class Store:
                 size=size,
                 uploaded_at=now,
                 updated_at=now,
-                title=str(embedded_metadata.get("title", "")).strip() or Path(filename).stem,
+                title=str(embedded_metadata.get("title", "")).strip()
+                or Path(filename).stem,
                 artist=str(embedded_metadata.get("artist", "")).strip(),
                 album=str(embedded_metadata.get("album", "")).strip(),
                 rating=clamp_rating(embedded_metadata.get("rating", 0)),
@@ -355,7 +378,13 @@ class Store:
         album: str,
         artist: str,
     ) -> list[Track]:
-        unique_track_ids = [track_id for track_id in dict.fromkeys(str(track_id).strip() for track_id in track_ids) if track_id]
+        unique_track_ids = [
+            track_id
+            for track_id in dict.fromkeys(
+                str(track_id).strip() for track_id in track_ids
+            )
+            if track_id
+        ]
         if not unique_track_ids:
             return []
 
@@ -390,7 +419,9 @@ class Store:
 
             return moved_tracks
 
-    def move_track_to_library(self, source_library_id: str, track_id: str, *, target_library_id: str) -> Track:
+    def move_track_to_library(
+        self, source_library_id: str, track_id: str, *, target_library_id: str
+    ) -> Track:
         if source_library_id == target_library_id:
             raise ValueError("Choose a different library.")
 
@@ -398,24 +429,34 @@ class Store:
             source_library = self.get_library(source_library_id)
             target_library = self.get_library(target_library_id)
             track = self._find_track(source_library, track_id)
-            source_file_path = self.library_files_dir(source_library_id) / track.stored_name
+            source_file_path = (
+                self.library_files_dir(source_library_id) / track.stored_name
+            )
             if not source_file_path.exists():
                 raise TrackNotFoundError(track_id)
 
-            extension = Path(track.stored_name).suffix or Path(track.original_name).suffix
+            extension = (
+                Path(track.stored_name).suffix or Path(track.original_name).suffix
+            )
             new_track_id = str(uuid.uuid4())
             new_stored_name = f"{new_track_id}{extension}"
-            target_file_path = self.library_files_dir(target_library_id) / new_stored_name
+            target_file_path = (
+                self.library_files_dir(target_library_id) / new_stored_name
+            )
             target_file_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_file_path, target_file_path)
 
             new_cover_name = ""
             if track.cover_art_name:
-                source_cover_path = self.library_covers_dir(source_library_id) / track.cover_art_name
+                source_cover_path = (
+                    self.library_covers_dir(source_library_id) / track.cover_art_name
+                )
                 if source_cover_path.exists():
                     cover_extension = Path(track.cover_art_name).suffix or ".jpg"
                     new_cover_name = f"{new_track_id}{cover_extension}"
-                    target_cover_path = self.library_covers_dir(target_library_id) / new_cover_name
+                    target_cover_path = (
+                        self.library_covers_dir(target_library_id) / new_cover_name
+                    )
                     shutil.copy2(source_cover_path, target_cover_path)
 
             now = _now()
@@ -439,7 +480,9 @@ class Store:
             target_library.tracks.insert(0, moved_track)
             target_library.updated_at = now
 
-            source_library.tracks = [item for item in source_library.tracks if item.id != track_id]
+            source_library.tracks = [
+                item for item in source_library.tracks if item.id != track_id
+            ]
             self._remove_track_ids_from_collections_locked(source_library, [track_id])
             source_library.updated_at = now
 
@@ -448,13 +491,17 @@ class Store:
 
             _unlink_with_retries(source_file_path)
             if track.cover_art_name:
-                source_cover_path = self.library_covers_dir(source_library_id) / track.cover_art_name
+                source_cover_path = (
+                    self.library_covers_dir(source_library_id) / track.cover_art_name
+                )
                 if source_cover_path.exists():
                     _unlink_with_retries(source_cover_path)
 
             return moved_track
 
-    def set_track_rating(self, library_id: str, track_id: str, *, rating: int | str) -> Track:
+    def set_track_rating(
+        self, library_id: str, track_id: str, *, rating: int | str
+    ) -> Track:
         with self._lock:
             library = self.get_library(library_id)
             track = self._find_track(library, track_id)
@@ -524,11 +571,15 @@ class Store:
 
         with self._lock:
             library = self.get_library(library_id)
-            tracks_to_remove = [track for track in library.tracks if track.id in unique_track_ids]
+            tracks_to_remove = [
+                track for track in library.tracks if track.id in unique_track_ids
+            ]
             if not tracks_to_remove:
                 raise TrackNotFoundError(",".join(sorted(unique_track_ids)))
 
-            library.tracks = [item for item in library.tracks if item.id not in unique_track_ids]
+            library.tracks = [
+                item for item in library.tracks if item.id not in unique_track_ids
+            ]
             library.updated_at = _now()
             self._write_library(library)
 
@@ -537,7 +588,9 @@ class Store:
                 if file_path.exists():
                     _unlink_with_retries(file_path)
                 if track.cover_art_name:
-                    cover_path = self.library_covers_dir(library_id) / track.cover_art_name
+                    cover_path = (
+                        self.library_covers_dir(library_id) / track.cover_art_name
+                    )
                     if cover_path.exists():
                         _unlink_with_retries(cover_path)
 
@@ -550,6 +603,24 @@ class Store:
         if not file_path.exists():
             raise TrackNotFoundError(track_id)
         return track, file_path
+
+    def reorder_tracks(self, library_id: str, track_ids: list[str]) -> list[Track]:
+        """Re-order the track list to match *track_ids*. Returns the re-ordered list."""
+        with self._lock:
+            library = self.get_library(library_id)
+            ordered: list[Track] = []
+            track_by_id: dict[str, Track] = {t.id: t for t in library.tracks}
+            for track_id in track_ids:
+                track_id = str(track_id).strip()
+                if track_id in track_by_id:
+                    ordered.append(track_by_id.pop(track_id))
+            # Append any tracks not listed (should not happen, but be safe)
+            ordered.extend(track_by_id.values())
+            if ordered != library.tracks:
+                library.tracks = ordered
+                library.updated_at = _now()
+                self._write_library(library)
+            return ordered
 
     def get_track(self, library_id: str, track_id: str) -> Track:
         library = self.get_library(library_id)
@@ -589,11 +660,17 @@ class Store:
     @staticmethod
     def _normalize_track_ids(library: Library, track_ids: list[str]) -> list[str]:
         valid_track_ids = {track.id for track in library.tracks}
-        return [track_id for track_id in _unique_strings(track_ids) if track_id in valid_track_ids]
+        return [
+            track_id
+            for track_id in _unique_strings(track_ids)
+            if track_id in valid_track_ids
+        ]
 
     @staticmethod
     def _prune_empty_collections_locked(library: Library) -> None:
-        library.collections = [collection for collection in library.collections if collection.track_ids]
+        library.collections = [
+            collection for collection in library.collections if collection.track_ids
+        ]
 
     def _remove_track_ids_from_collections_locked(
         self,
@@ -609,7 +686,11 @@ class Store:
             if except_collection_id and collection.id == except_collection_id:
                 continue
 
-            next_track_ids = [track_id for track_id in collection.track_ids if track_id not in target_ids]
+            next_track_ids = [
+                track_id
+                for track_id in collection.track_ids
+                if track_id not in target_ids
+            ]
             removed += len(collection.track_ids) - len(next_track_ids)
             if next_track_ids != collection.track_ids:
                 collection.track_ids = next_track_ids
@@ -658,7 +739,9 @@ def _unique_strings(values: list[str]) -> list[str]:
     return unique
 
 
-def _unlink_with_retries(path: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:
+def _unlink_with_retries(
+    path: Path, attempts: int = 10, delay_seconds: float = 0.05
+) -> None:
     last_error: PermissionError | None = None
     for _ in range(attempts):
         try:
@@ -675,7 +758,9 @@ def _unlink_with_retries(path: Path, attempts: int = 10, delay_seconds: float = 
         raise last_error
 
 
-def _rmtree_with_retries(path: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:
+def _rmtree_with_retries(
+    path: Path, attempts: int = 10, delay_seconds: float = 0.05
+) -> None:
     last_error: PermissionError | None = None
 
     def on_error(_func, failed_path, exc_info):

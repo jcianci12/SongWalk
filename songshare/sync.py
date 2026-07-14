@@ -106,3 +106,27 @@ def init_sync(app):
                     },
                     to=room_name,
                 )
+
+
+def broadcast_library_change(
+    library_id: str, event_type: str, payload: dict | None = None
+) -> None:
+    """Notify all sync peers that the library has changed (add/delete/rename/reorder).
+
+    Emits to the sync room for *library_id* with include_self=False so the
+    triggering peer (which already updated its own UI) does not reload twice.
+    """
+    room = _room_for(library_id)
+    data: dict = {
+        "event": event_type,
+        "library_id": library_id,
+        "timestamp": time.time(),
+    }
+    if payload:
+        data["payload"] = payload
+    try:
+        socketio.emit("library_changed", data, to=room)
+    except RuntimeError:
+        # socketio.emit raises RuntimeError if called outside of a SocketIO
+        # request context and the server is not running (e.g. during tests).
+        pass

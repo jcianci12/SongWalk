@@ -586,11 +586,16 @@
       }
     }
 
-    const refreshed = await refreshSharedLibraryContent(undefined, undefined, preservedState);
-    if (!refreshed) {
-      window.location.reload();
+    isReloadingForSharedLibraryState = true;
+    try {
+      const refreshed = await refreshSharedLibraryContent(undefined, undefined, preservedState);
+      if (!refreshed) {
+        window.location.reload();
+      }
+      return refreshed;
+    } finally {
+      isReloadingForSharedLibraryState = false;
     }
-    return refreshed;
   }
 
   async function pollSharedLibraryState() {
@@ -4179,6 +4184,8 @@
         if (!data.library_id || !syncRoom) return;
         var ourLibId = syncRoom.replace('sync:', '');
         if (data.library_id !== ourLibId) return;
+        // Skip if already refreshing from our own HTTP response.
+        if (isReloadingForSharedLibraryState) return;
 
         var opts = {};
         if (data.event === 'track_deleted' && data.payload) {

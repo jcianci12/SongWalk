@@ -622,6 +622,32 @@ class Store:
                 self._write_library(library)
             return ordered
 
+    def reorder_albums(self, library_id: str, album_keys: list[str]) -> list[Track]:
+        """Re-order tracks so albums appear in the given order."""
+        with self._lock:
+            library = self.get_library(library_id)
+            key_set = set(album_keys)
+            # Group tracks by album
+            ordered: list[Track] = []
+            remaining: dict[str, list[Track]] = {}
+            for track in library.tracks:
+                key = (track.album or "").strip().lower()
+                if key in key_set:
+                    remaining.setdefault(key, []).append(track)
+                else:
+                    ordered.append(track)
+            # Append tracks in specified album order
+            for key in album_keys:
+                ordered.extend(remaining.pop(key, []))
+            # Append any remaining (unknown albums)
+            for tracks in remaining.values():
+                ordered.extend(tracks)
+            if ordered != library.tracks:
+                library.tracks = ordered
+                library.updated_at = _now()
+                self._write_library(library)
+            return ordered
+
     def get_track(self, library_id: str, track_id: str) -> Track:
         library = self.get_library(library_id)
         return self._find_track(library, track_id)

@@ -3106,7 +3106,9 @@
       }
 
       var alreadySelected = row.classList.contains('is-selected');
-      selectRow(row, alreadySelected);
+      // Auto-play if this row was already selected, OR if something is already playing
+      var shouldAutoplay = alreadySelected || (player && !player.paused);
+      selectRow(row, shouldAutoplay);
     });
 
     row.addEventListener("keydown", (event) => {
@@ -4406,6 +4408,81 @@
         } catch (_) {}
         btn.disabled = false;
         btn.textContent = '\u00d7';
+      });
+    });
+  })();
+
+  // ---- Album drag-to-reorder ----
+  (function bindAlbumDragReorder() {
+    var albumSections = document.querySelectorAll('[data-album-section]');
+    if (!albumSections.length) return;
+
+    albumSections.forEach(function (section) {
+      section.setAttribute('draggable', 'true');
+
+      section.addEventListener('dragstart', function (e) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+        section.classList.add('is-drag-source');
+      });
+
+      section.addEventListener('dragend', function () {
+        section.classList.remove('is-drag-source');
+        document.querySelectorAll('.album-section').forEach(function (s) {
+          s.classList.remove('is-drop-target');
+        });
+      });
+
+      section.addEventListener('dragenter', function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        section.classList.add('is-drop-target');
+      });
+
+      section.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      });
+
+      section.addEventListener('dragleave', function () {
+        section.classList.remove('is-drop-target');
+      });
+
+      section.addEventListener('drop', function (e) {
+        e.preventDefault();
+        section.classList.remove('is-drop-target');
+        var source = document.querySelector('.album-section.is-drag-source');
+        if (!source || source === section) return;
+
+        // Swap positions in DOM
+        var parent = section.parentNode;
+        var sourceNext = source.nextSibling;
+        var targetNext = section.nextSibling;
+
+        if (sourceNext === section) {
+          // Source was directly above target
+          parent.insertBefore(section, source);
+        } else if (targetNext === source) {
+          // Target was directly above source
+          parent.insertBefore(source, section);
+        } else {
+          parent.insertBefore(source, targetNext);
+          parent.insertBefore(section, sourceNext);
+        }
+
+        // Send new album order to server
+        var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0];
+        var albumKeys = [];
+        parent.querySelectorAll('[data-album-section]').forEach(function (s) {
+          var key = s.getAttribute('data-album-key');
+          if (key) albumKeys.push(key);
+        });
+
+        fetch('/s/' + libraryId + '/albums/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
+          body: JSON.stringify({ album_keys: albumKeys })
+        }).catch(function () {});
       });
     });
   })();

@@ -1420,6 +1420,32 @@ def create_app(test_config: dict | None = None) -> Flask:
             )
         )
 
+    @app.post("/s/<library_id>/albums/reorder")
+    def reorder_albums(library_id: str):
+        payload = request.get_json(silent=True) or {}
+        album_keys = payload.get("album_keys", [])
+        if not isinstance(album_keys, list) or not album_keys:
+            return jsonify(
+                {"ok": False, "error": "album_keys must be a non-empty list."}
+            ), 400
+
+        try:
+            store.reorder_albums(library_id, [str(k) for k in album_keys])
+        except (LibraryNotFoundError, TrackNotFoundError):
+            abort(404)
+
+        broadcast_library_change(
+            library_id, "albums_reordered", {"album_keys": album_keys}
+        )
+
+        if wants_json():
+            return jsonify({"ok": True, "reordered": len(album_keys)})
+        return redirect(
+            url_for(
+                "view_library", library_id=library_id, notice="Album order updated."
+            )
+        )
+
     @app.get("/s/<library_id>/tracks/<track_id>/file")
     def stream_track(library_id: str, track_id: str):
         try:

@@ -1578,6 +1578,9 @@ def create_app(test_config: dict | None = None) -> Flask:
                 }
             )
         return redirect(url_for("home", notice="YouTube cookies updated."))
+
+    @app.get("/email/test/<owner_token>")
+    def email_test_send(owner_token: str):
         if owner_token != app.config["OWNER_TOKEN"]:
             abort(404)
 

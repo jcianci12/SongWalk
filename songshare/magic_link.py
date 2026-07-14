@@ -25,7 +25,16 @@ class MagicLinkStore:
     def _load_mappings(self) -> dict:
         if not self._mapping_path.exists():
             return {}
-        return json.loads(self._mapping_path.read_text(encoding="utf-8"))
+        mappings = json.loads(self._mapping_path.read_text(encoding="utf-8"))
+        # Migrate old single-library format to list
+        changed = False
+        for key, entry in mappings.items():
+            if "library_id" in entry and "library_ids" not in entry:
+                entry["library_ids"] = [entry.pop("library_id")]
+                changed = True
+        if changed:
+            self._save_mappings(mappings)
+        return mappings
 
     def _save_mappings(self, mappings: dict) -> None:
         self._mapping_path.write_text(json.dumps(mappings, indent=2), encoding="utf-8")
@@ -41,16 +50,29 @@ class MagicLinkStore:
             return None
 
     def get_library_id(self, email: str) -> str | None:
+        """Get the most recently created library ID for email, or None."""
         mappings = self._load_mappings()
         entry = mappings.get(email.lower().strip())
-        return entry["library_id"] if entry else None
+        return (
+            entry["library_ids"][-1] if (entry and entry.get("library_ids")) else None
+        )
 
-    def set_library_id(self, email: str, library_id: str) -> None:
+    def get_all_libraries(self, email: str) -> list[str]:
+        """Get all library IDs for email (newest first)."""
+        mappings = self._load_mappings()
+        entry = mappings.get(email.lower().strip())
+        if entry and entry.get("library_ids"):
+            return list(reversed(entry["library_ids"]))
+        return []
+
+    def add_library(self, email: str, library_id: str) -> None:
+        """Add a library to the user's account."""
         mappings = self._load_mappings()
         key = email.lower().strip()
-        mappings[key] = {
-            "email": key,
-            "library_id": library_id,
-            "created_at": time.time(),
-        }
+        if key not in mappings:
+            mappings[key] = {"email": key, "library_ids": [], "created_at": time.time()}
+        ids = mappings[key].get("library_ids", [])
+        if library_id not in ids:
+            ids.append(library_id)
+        mappings[key]["library_ids"] = ids
         self._save_mappings(mappings)

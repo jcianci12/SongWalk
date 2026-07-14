@@ -1523,19 +1523,51 @@ def create_app(test_config: dict | None = None) -> Flask:
                 )
             )
 
-        library_id = magic_link_store.get_library_id(email)
-        if library_id:
+        # Generate a session token so the /my page can authenticate
+        session_token = magic_link_store.generate_token(email)
+        return redirect(url_for("my_libraries", t=session_token))
+
+    @app.get("/my")
+    def my_libraries():
+        token = request.args.get("t", "").strip()
+        if not token:
+            return redirect(url_for("home"))
+
+        email = magic_link_store.verify_token(token)
+        if not email:
+            return redirect(
+                url_for("home", error="Session expired. Request a new link.")
+            )
+
+        library_ids = magic_link_store.get_all_libraries(email)
+        libraries = []
+        for lid in library_ids:
             try:
-                store.get_library(library_id)
+                libraries.append(store.get_library(lid))
             except LibraryNotFoundError:
-                library_id = None
+                pass
 
-        if not library_id:
-            library = store.create_library(name=email)
-            library_id = library.id
-            magic_link_store.set_library_id(email, library_id)
+        return render_template(
+            "my.html",
+            email=email,
+            libraries=libraries,
+            token=token,
+        )
 
-        return redirect(url_for("view_library", library_id=library_id))
+    @app.post("/my/create")
+    def my_create_library():
+        token = request.form.get("t", "").strip()
+        if not token:
+            return redirect(url_for("home"))
+
+        email = magic_link_store.verify_token(token)
+        if not email:
+            return redirect(url_for("home", error="Session expired."))
+
+        name = request.form.get("name", "").strip() or email
+        library = store.create_library(name=name)
+        magic_link_store.add_library(email, library.id)
+        return redirect(url_for("view_library", library_id=library.id))
 
     @app.post("/api/import/cookies")
     def upload_youtube_cookies():

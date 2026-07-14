@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2c82d3">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <title>My Libraries — SongWalk</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" data-dynamic-favicon>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
+    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+  </head>
+  <body class="wmp-page">
+    <div class="wmp-window home-window">
+      <header class="title-band">
+        <div class="title-band-left">
+          {% include '_brand.html' %}
+        </div>
+      </header>
+
+      <div class="menu-band">
+        <div class="menu-links">
+          <span>Your libraries · {{ email }}</span>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <main class="content-pane">
+          <div class="view-band">
+            <div>
+              <h1>My Libraries</h1>
+            </div>
+          </div>
+
+          {% if libraries %}
+            <section class="table-shell">
+              <div class="table-head library-table-head">
+                <span></span>
+                <span>Name</span>
+                <span>Tracks</span>
+                <span>Created</span>
+                <span></span>
+              </div>
+              {% for lib in libraries %}
+                <div class="library-row">
+                  <span>🎵</span>
+                  <span>
+                    <a class="library-link" href="{{ url_for('view_library', library_id=lib.id) }}">{{ lib.display_name }}</a>
+                    <span class="library-id-note">{{ lib.id[:8] }}</span>
+                  </span>
+                  <span>{{ lib.tracks|length }}</span>
+                  <span>{{ lib.created_at.strftime('%d %b %Y') }}</span>
+                  <span>
+                    <a class="frame-button" href="{{ url_for('view_library', library_id=lib.id) }}">Open</a>
+                  </span>
+                </div>
+              {% endfor %}
+            </section>
+          {% else %}
+            <div class="empty-table">No libraries yet. Create one below.</div>
+          {% endif %}
+
+          <section class="share-entry-card">
+            <p class="share-entry-lead">Create a new library</p>
+            <form method="post" action="/my/create" class="share-jump">
+              <input type="hidden" name="t" value="{{ token }}">
+              <input type="text" name="name" placeholder="Library name (optional)" value="">
+              <button type="submit" class="frame-button primary">Create Library</button>
+            </form>
+          </section>
+
+          <p style="text-align: center; margin-top: 24px;">
+            <a href="{{ url_for('home') }}">← Back to home</a>
+          </p>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}");
+      }
+    </script>
+  </body>
+</html>

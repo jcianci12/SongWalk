@@ -3910,6 +3910,33 @@
     });
   })();
 
+  // Repurpose "Share access" link as "Listen Together" — BEFORE overflow menu runs
+  (function initListenTogether() {
+    var titleActions = document.querySelector('.title-actions');
+    if (!titleActions) return;
+
+    var links = titleActions.querySelectorAll('a.frame-button');
+    var shareLink = null;
+    for (var i = 0; i < links.length; i++) {
+      if ((links[i].textContent || '').trim() === 'Share access') {
+        shareLink = links[i];
+        break;
+      }
+    }
+
+    if (shareLink) {
+      shareLink.removeAttribute('href');
+      shareLink.style.cursor = 'pointer';
+      shareLink.innerHTML = '\u{1F3B5} Listen Together';
+      shareLink.title = 'Sync playback with friends';
+      shareLink.setAttribute('data-sync-toggle', '');
+      shareLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        toggleListenTogether();
+      });
+    }
+  })();
+
   (function bindTitleOverflow() {
     var titleActions = document.querySelector('.title-actions');
     if (!titleActions) return;
@@ -3998,37 +4025,6 @@
     var syncResyncTimer = null;
     var syncPeers = {};
     var syncIgnoreUntil = 0;
-
-    function initListenTogether() {
-      var syncBtn = document.createElement('button');
-      syncBtn.type = 'button';
-      syncBtn.className = 'frame-button';
-      syncBtn.setAttribute('data-sync-toggle', '');
-      syncBtn.innerHTML = '\u{1F3B5} Listen Together';
-      syncBtn.title = 'Sync playback with friends';
-      syncBtn.style.whiteSpace = 'nowrap';
-
-      // Replace "Share access" link in title bar with this button
-      var titleActions = document.querySelector('.title-actions');
-      if (titleActions) {
-        // Find "Share access" by text content (href varies: / on prod, / on dev)
-        var links = titleActions.querySelectorAll('a.frame-button');
-        var shareLink = null;
-        for (var i = 0; i < links.length; i++) {
-          if ((links[i].textContent || '').trim() === 'Share access') {
-            shareLink = links[i];
-            break;
-          }
-        }
-        if (shareLink) {
-          shareLink.parentNode.replaceChild(syncBtn, shareLink);
-        } else {
-          titleActions.appendChild(syncBtn);
-        }
-      }
-
-      syncBtn.addEventListener('click', toggleListenTogether);
-    }
 
     function toggleListenTogether() {
       if (syncEnabled) {
@@ -4312,8 +4308,6 @@
     }
 
     if (document.querySelector('.transport-band')) {
-      initListenTogether();
-
       // Auto-join from URL param (e.g. QR code scan)
       if (window.location.search.indexOf('sync=join') !== -1) {
         showSyncDialog();

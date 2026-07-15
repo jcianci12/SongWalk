@@ -4060,7 +4060,9 @@
       modal.className = 'sync-modal';
 
       var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0].split('#')[0];
-      var joinUrl = window.location.origin + '/s/' + libraryId + '?sync=join';
+      // Embed server time in join URL for instant clock calibration
+      var stParam = syncServerTimeOffset ? '&st=' + Math.round((Date.now() + syncServerTimeOffset) / 1000) : '';
+      var joinUrl = window.location.origin + '/s/' + libraryId + '?sync=join' + stParam;
       var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(joinUrl);
 
       modal.innerHTML = '<div class="sync-modal-card">' +
@@ -4420,6 +4422,13 @@
     if (document.querySelector('.transport-band')) {
       // Auto-join from URL param (e.g. QR code scan)
       if (window.location.search.indexOf('sync=join') !== -1) {
+        // Pre-calibrate clock from embedded server timestamp in URL
+        var stMatch = window.location.search.match(/[?&]st=(\d+)/);
+        if (stMatch) {
+          var serverMs = parseInt(stMatch[1], 10) * 1000;
+          syncServerTimeOffset = serverMs - Date.now();
+          console.log('[Sync] Pre-calibrated clock offset from URL:', Math.round(syncServerTimeOffset), 'ms');
+        }
         if (window.__songwalkShowSyncDialog) window.__songwalkShowSyncDialog();
       }
 

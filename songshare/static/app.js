@@ -3215,6 +3215,65 @@
     row.addEventListener("dragend", () => {
       clearCurrentTrackDrag();
     });
+
+    // Track-level drop: reorder within same album
+    row.addEventListener("dragover", (event) => {
+      if (!currentTrackDrag || !currentTrackDrag.trackIds.length) return;
+      var draggedAlbum = getTrackAlbumKey(currentTrackDrag.trackIds[0]);
+      var targetAlbum = getTrackAlbumKey(row.dataset.trackId);
+      if (!draggedAlbum || draggedAlbum !== targetAlbum) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    });
+
+    row.addEventListener("drop", async (event) => {
+      if (!currentTrackDrag || !currentTrackDrag.trackIds.length) return;
+      var draggedAlbum = getTrackAlbumKey(currentTrackDrag.trackIds[0]);
+      var targetAlbum = getTrackAlbumKey(row.dataset.trackId);
+      if (!draggedAlbum || draggedAlbum !== targetAlbum) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      var albumSection = row.closest('[data-album-section]');
+      if (!albumSection) return;
+
+      var allRows = albumSection.querySelectorAll('[data-track-row]');
+      var orderedIds = [];
+      var draggedIds = currentTrackDrag.trackIds.slice();
+      var dropTargetId = row.dataset.trackId;
+
+      allRows.forEach(function (r) {
+        var tid = r.dataset.trackId;
+        if (tid === dropTargetId) {
+          orderedIds.push(tid);
+          draggedIds.forEach(function (did) {
+            if (!orderedIds.includes(did)) orderedIds.push(did);
+          });
+        } else if (!draggedIds.includes(tid)) {
+          orderedIds.push(tid);
+        }
+      });
+
+      var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0];
+      try {
+        await fetch('/s/' + libraryId + '/tracks/reorder', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
+          body: JSON.stringify({ track_ids: orderedIds })
+        });
+      } catch (_) {}
+
+      clearCurrentTrackDrag();
+    });
+
+    // Helper: get album key for a track
+    function getTrackAlbumKey(trackId) {
+      var row = findRowByTrackId(trackId);
+      if (!row) return null;
+      var section = row.closest('[data-album-section]');
+      return section ? section.getAttribute('data-album-key') : null;
+    }
   }
 
   function bindAlbumCard(card) {

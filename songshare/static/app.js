@@ -4542,7 +4542,7 @@
 
   // ---- Offline mode toggle ----
   (function bindOfflineMode() {
-    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return;
+    if (!('serviceWorker' in navigator)) return;
 
     var titleActions = document.querySelector('.title-actions');
     if (!titleActions) return;
@@ -4560,6 +4560,11 @@
     var cachedCount = 0;
 
     offlineBtn.addEventListener('click', async function () {
+      if (!navigator.serviceWorker.controller) {
+        offlineBtn.textContent = 'Reload page first';
+        return;
+      }
+      if (isCaching) return;
       if (isCaching) return;
       isCaching = true;
       offlineBtn.textContent = 'Caching...';

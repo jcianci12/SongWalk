@@ -7,9 +7,32 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#2c82d3">
+    <meta name="description" content="SongWalk is a self-hosted music dropbox. Create libraries, share them with a link, and listen together in real time. Retro WMP-inspired UI with pixel-art CD, drag-to-reorder, and magic link auth — no passwords.">
+    <meta name="keywords" content="self-hosted music, music dropbox, listen together, real-time music sync, private music library, music sharing, PWA music player, Flask music app">
+    <meta name="author" content="SongWalk">
+    <link rel="canonical" href="{{ base_url }}/">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
-    <title>SongWalk Library</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=3">
+
+    <!-- Open Graph -->
+    <meta property="og:title" content="SongWalk — Self-Hosted Music Dropbox">
+    <meta property="og:description" content="Create libraries, share them with a link, and listen together in real time. Built with Flask, vanilla JS, and a healthy dose of Windows Media Player nostalgia.">
+    <meta property="og:image" content="{{ base_url }}{{ url_for('static', filename='icons/icon.svg') }}">
+    <meta property="og:image:type" content="image/svg+xml">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:url" content="{{ base_url }}/">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="SongWalk">
+    <meta property="og:locale" content="en_AU">
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="SongWalk — Self-Hosted Music Dropbox">
+    <meta name="twitter:description" content="Create libraries, share them with a link, and listen together in real time. No passwords — just magic links.">
+    <meta name="twitter:image" content="{{ base_url }}{{ url_for('static', filename='icons/icon.svg') }}">
+
+    <title>SongWalk — Self-Hosted Music Dropbox | Share &amp; Listen Together</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=4">
     <script defer src="{{ url_for('static', filename='app.js') }}?v=3"></script>
     <script defer src="{{ url_for('static', filename='sync.js') }}?v=3"></script>
   </head>
@@ -22,6 +45,11 @@
             <span class="local-access-badge" title="Direct local access">🖥️ Local</span>
           {% endif %}
           <span class="crumbs">Library &gt; Music &gt; Share access</span>
+        </div>
+        <div class="splash-runners" aria-hidden="true">
+          <img src="https://media.tenor.com/chfzEVhXQloAAAAj/animated-man-running.gif" class="splash-runner" alt="">
+          <img src="https://media.tenor.com/chfzEVhXQloAAAAj/animated-man-running.gif" class="splash-runner" alt="">
+          <img src="https://media.tenor.com/chfzEVhXQloAAAAj/animated-man-running.gif" class="splash-runner" alt="">
         </div>
       </header>
 

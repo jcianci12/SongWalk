@@ -2667,3 +2667,75 @@ audio {
   border-color: #4a9b5e;
   color: #1f5c2f;
 }
+
+/* ---- Listen Together running people ---- */
+.sync-listeners-row {
+  text-align: center;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sync-runners {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.sync-runner {
+  width: 40px;
+  height: 40px;
+  margin-left: -12px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.sync-runner:first-child {
+  margin-left: 0;
+}
+
+.sync-runner:nth-child(1) { animation-duration: 0.8s; }
+.sync-runner:nth-child(2) { animation-duration: 1.0s; }
+.sync-runner:nth-child(3) { animation-duration: 0.7s; }
+.sync-runner:nth-child(4) { animation-duration: 1.2s; }
+.sync-runner:nth-child(5) { animation-duration: 0.9s; }
+
+.sync-runner-pulse {
+  animation: runner-bounce 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes runner-bounce {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-4px); }
+}
+
+.sync-runner-none {
+  font-size: 0.85rem;
+  color: var(--text-soft);
+  padding: 8px 0;
+}
+
+/* ---- Title bar runners widget ---- */
+.sync-runners-widget {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 0 8px;
+}
+
+.sync-runners-title-band {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.sync-runners-title-band .sync-runner {
+  width: 28px;
+  height: 28px;
+  margin-left: -10px;
+}
+
+.sync-runners-title-band .sync-runner:first-child {
+  margin-left: 0;
+}

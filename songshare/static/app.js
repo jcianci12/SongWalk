@@ -3988,6 +3988,19 @@
     });
   })();
 
+  // ---- Running people widget in title bar ----
+  (function injectRunnersWidget() {
+    var titleBand = document.querySelector('.title-band');
+    if (!titleBand) return;
+
+    var widget = document.createElement('div');
+    widget.className = 'sync-runners-widget';
+    widget.id = 'sync-runners-widget';
+    widget.style.display = 'none';
+    widget.innerHTML = '<div class="sync-runners-title-band" id="sync-runners-tb"></div>';
+    titleBand.appendChild(widget);
+  })();
+
   // Repurpose "Share access" link as "Listen Together" — BEFORE overflow menu runs
   (function initListenTogether() {
     var titleActions = document.querySelector('.title-actions');
@@ -4146,6 +4159,9 @@
           '<img src="' + escapeHtml(qrUrl) + '" alt="QR code to join session" class="sync-qr-img" width="200" height="200">' +
           '<p class="sync-qr-url">' + escapeHtml(joinUrl) + '</p>' +
           '<button type="button" class="frame-button sync-copy-btn">Copy link</button>' +
+        '</div>' +
+        '<div class="sync-listeners-row">' +
+          '<div class="sync-runners" id="sync-runners"></div>' +
         '</div>' +
         '<div class="sync-peers-section">' +
           '<p class="sync-peers-count">Connecting\u2026</p>' +
@@ -4429,6 +4445,10 @@
       var btn = document.querySelector('[data-sync-toggle]');
       if (btn) btn.classList.remove('is-active');
 
+      // Hide title bar runners
+      var widget = document.getElementById('sync-runners-widget');
+      if (widget) widget.style.display = 'none';
+
       updateSyncPeers();
       updateSyncStatus();
     }
@@ -4498,6 +4518,25 @@
           list.appendChild(li);
         });
       }
+      // Update runners in both dialog and title bar
+      updateRunners('sync-runners', Object.keys(syncPeers).length);
+      updateRunners('sync-runners-tb', Object.keys(syncPeers).length);
+
+      // Show/hide title bar widget
+      var widget = document.getElementById('sync-runners-widget');
+      if (widget) widget.style.display = (syncConnected && peerCount > 0) ? 'flex' : 'none';
+    }
+
+    function updateRunners(containerId, count) {
+      var container = document.getElementById(containerId);
+      if (!container) return;
+      if (count === 0) {
+        container.innerHTML = '<span class="sync-runner-none">Waiting for friends...</span>';
+        return;
+      }
+      // Use inline data URI for running person (small animated SVG for performance)
+      var runnerImg = '<img src="https://media.tenor.com/chfzEVhXQloAAAAj/animated-man-running.gif" class="sync-runner sync-runner-pulse" alt="listener">';
+      container.innerHTML = runnerImg.repeat(count + 1); // +1 for self
     }
 
     if (document.querySelector('.transport-band')) {

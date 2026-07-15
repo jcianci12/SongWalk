@@ -3248,12 +3248,12 @@
       event.preventDefault();
       event.stopPropagation();
 
-      // Collect final order from DOM and persist to server
-      var albumSection = row.closest('[data-album-section]');
-      if (!albumSection) return;
+      // Collect FULL library track order from DOM (all albums) and persist
       var orderedIds = [];
-      albumSection.querySelectorAll('[data-track-row]').forEach(function (r) {
-        orderedIds.push(r.dataset.trackId);
+      document.querySelectorAll('[data-album-section]').forEach(function (section) {
+        section.querySelectorAll('[data-track-row]').forEach(function (r) {
+          orderedIds.push(r.dataset.trackId);
+        });
       });
 
       var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0];

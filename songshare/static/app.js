@@ -3350,6 +3350,17 @@
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       setAlbumDropTarget(node);
+
+      // Instant DOM move: put dragged row into target album's track container
+      if (currentTrackDrag && currentTrackDrag.trackIds.length) {
+        var draggedRow = findRowByTrackId(currentTrackDrag.trackIds[0]);
+        if (draggedRow) {
+          var targetStack = node.querySelector('.track-stack');
+          if (targetStack && !targetStack.contains(draggedRow)) {
+            targetStack.appendChild(draggedRow);
+          }
+        }
+      }
     });
 
     node.addEventListener("dragleave", (event) => {

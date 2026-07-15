@@ -98,11 +98,24 @@ def init_sync(app):
         if not library_id or not action:
             return
         room = _room_for(library_id)
-        data["peer_id"] = request.sid
-        data["server_time"] = time.time()
-        # Schedule execution 150ms in the future so all peers execute at the same moment
-        data["execute_at"] = data["server_time"] + 0.15
-        emit("sync_action", data, to=room, include_self=False)
+        sid = request.sid
+
+        # Build authoritative state from the action
+        state = {
+            "action": action,
+            "track_id": data.get("track_id", ""),
+            "position": data.get("position", 0),
+            "playing": action != "pause",
+            "peer_id": sid,
+            "server_time": time.time(),
+        }
+
+        # Update master state for this room
+        _room_sync_state[room] = state
+
+        # Broadcast to all EXCEPT sender — they get the authoritative state
+        state["execute_at"] = state["server_time"] + 0.15
+        emit("sync_action", state, to=room, include_self=False)
 
     @socketio.on("sync_state")
     def handle_sync_state(data):

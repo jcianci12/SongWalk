@@ -1,4 +1,4 @@
-const CACHE_NAME = 'songwalk-v2';
+const CACHE_NAME = 'songwalk-v3';
 const STATIC_ASSETS = [
   '/',
   '/static/site.css',
@@ -30,8 +30,12 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// ---- Message handler: cache audio files on demand ----
+// ---- Message handler: skipWaiting + cache audio files on demand ----
 self.addEventListener('message', (event) => {
+  if (event.data && event.data.action === 'skipWaiting') {
+    self.skipWaiting();
+    return;
+  }
   if (event.data && event.data.action === 'cache-tracks') {
     const tracks = event.data.tracks || [];
     cacheTracks(tracks).then((results) => {

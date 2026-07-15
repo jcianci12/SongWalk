@@ -4365,8 +4365,11 @@
       });
     }
 
+    var isRemoteAction = false;  // flag to suppress broadcast during remote sync
+
     function applyRemoteAction(data) {
       if (!player) return;
+      isRemoteAction = true;
 
       switch (data.action) {
         case 'play':
@@ -4539,8 +4542,9 @@
             var data = state.sync_state;
             if (data.track_id && data.position !== undefined) {
               syncWithRemoteState(data);
-            }
-          }
+      }
+      isRemoteAction = false;
+    }
         }).catch(function () {
           // Network error — just wait and retry
         }).finally(function () {
@@ -4613,13 +4617,13 @@
         var origPlay = player.play;
         player.play = function () {
           var result = origPlay.call(player);
-          if (syncEnabled) broadcastAction('play');
+          if (syncEnabled && !isRemoteAction) broadcastAction('play');
           return result;
         };
 
         var origPause = player.pause;
         player.pause = function () {
-          if (syncEnabled) broadcastAction('pause');
+          if (syncEnabled && !isRemoteAction) broadcastAction('pause');
           return origPause.call(player);
         };
 

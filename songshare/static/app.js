@@ -4160,12 +4160,14 @@
         showDebugText('Connected via ' + transport);
         syncSocket.emit('join_session', { library_id: libraryId });
         updateSyncStatus();
+        stopPollFallback();
         startResyncTimer();
       });
 
       syncSocket.on('connect_error', function (err) {
         console.error('[Sync] Connection error:', err.message);
         showDebugText('Error: ' + err.message);
+        startPollFallback(libraryId);
       });
 
       syncSocket.on('reconnect_error', function (err) {
@@ -4342,6 +4344,7 @@
 
     function disableSync() {
       syncEnabled = false;
+      stopPollFallback();
       if (syncResyncTimer) clearInterval(syncResyncTimer);
       if (syncSocket) {
         syncSocket.emit('leave_session', { library_id: syncRoom ? syncRoom.replace('sync:', '') : '' });
@@ -4367,6 +4370,36 @@
     function showDebugText(msg) {
       var el = document.getElementById('sync-debug-text');
       if (el) el.textContent = msg;
+    }
+
+    // ---- HTTP polling fallback when WebSocket is blocked ----
+    var pollTimer = null;
+
+    function startPollFallback(libraryId) {
+      if (pollTimer) return;  // already polling
+      showDebugText('Polling via HTTP (WebSocket blocked)');
+      console.log('[Sync] Starting HTTP poll fallback');
+      pollTimer = setInterval(function () {
+        fetch('/s/' + libraryId + '/state', {
+          headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' }
+        }).then(function (r) { return r.json(); }).then(function (state) {
+          if (state && state.sync_state && state.sync_state.peer_id !== syncPeerId) {
+            // Apply remote state from poll
+            var data = state.sync_state;
+            if (data.track_id && data.position !== undefined) {
+              syncWithRemoteState(data);
+            }
+          }
+        }).catch(function () {});
+      }, 3000);
+    }
+
+    function stopPollFallback() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        console.log('[Sync] Stopped HTTP poll fallback');
+      }
     }
 
     function updateSyncPeers() {
@@ -4560,11 +4593,15 @@
     var cachedCount = 0;
 
     offlineBtn.addEventListener('click', async function () {
+      if (isCaching) return;
+
+      // Wait for service worker to be ready
+      await navigator.serviceWorker.ready;
       if (!navigator.serviceWorker.controller) {
-        offlineBtn.textContent = 'Reload page first';
+        offlineBtn.textContent = 'Reload page & retry';
+        setTimeout(function () { offlineBtn.textContent = '\u25A1 Offline'; }, 3000);
         return;
       }
-      if (isCaching) return;
       if (isCaching) return;
       isCaching = true;
       offlineBtn.textContent = 'Caching...';

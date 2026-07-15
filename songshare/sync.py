@@ -11,6 +11,9 @@ socketio = SocketIO()
 # Track peers per sync room: { "sync:<library_id>": {sid, sid, ...} }
 _room_peers: dict[str, set[str]] = defaultdict(set)
 
+# Store last sync state per room for HTTP polling fallback
+_room_sync_state: dict[str, dict] = {}
+
 
 def _room_for(library_id: str) -> str:
     return f"sync:{library_id}"
@@ -21,6 +24,11 @@ def _peers_in_room(room: str, *, exclude: str | None = None) -> list[str]:
     if exclude and exclude in peers:
         peers.remove(exclude)
     return peers
+
+
+def get_sync_state(room: str) -> dict | None:
+    """Return the last known sync state for a room (for HTTP polling fallback)."""
+    return _room_sync_state.get(room)
 
 
 def init_sync(app):
@@ -89,6 +97,8 @@ def init_sync(app):
         room = _room_for(library_id)
         data["peer_id"] = request.sid
         data["timestamp"] = time.time()
+        # Store for HTTP polling fallback
+        _room_sync_state[room] = data
         emit("sync_state", data, to=room, include_self=False)
 
     @socketio.on("disconnect")
@@ -100,6 +110,7 @@ def init_sync(app):
                 _room_peers[room_name].discard(sid)
                 if not _room_peers[room_name]:
                     del _room_peers[room_name]
+                    _room_sync_state.pop(room_name, None)
                 peer_count = len(_room_peers.get(room_name, set()))
                 emit(
                     "peer_left",

@@ -42,7 +42,7 @@ from .store import (
     TrackNotFoundError,
     UploadedTrack,
 )
-from .sync import broadcast_library_change, init_sync, socketio
+from .sync import broadcast_library_change, get_sync_state, init_sync, socketio
 
 
 @dataclass
@@ -960,6 +960,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             abort(404)
 
         latest_import = public_import_job_status_for_library(library_id)
+        sync_state = get_sync_state(f"sync:{library_id}")
         return jsonify(
             {
                 "ok": True,
@@ -970,6 +971,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                 },
                 "import_job": latest_import,
                 "import_active": bool(latest_import and not latest_import["complete"]),
+                "sync_state": sync_state,
             }
         )
 
@@ -1676,6 +1678,22 @@ def create_app(test_config: dict | None = None) -> Flask:
         magic_link_store.add_library(email, library.id)
         return redirect(url_for("view_library", library_id=library.id))
 
+    # ------------------------------------------------------------------
+    # Cookie token state (in-memory — resets on restart, acceptable for sync flow)
+    # ------------------------------------------------------------------
+    _cookie_upload_tokens: dict[str, float] = {}
+
+    def _prune_expired_cookie_tokens(now: float | None = None) -> None:
+        if now is None:
+            now = time.time()
+        expired = [t for t, exp in _cookie_upload_tokens.items() if now >= exp]
+        for t in expired:
+            _cookie_upload_tokens.pop(t, None)
+
+    # ------------------------------------------------------------------
+    # Cookie upload endpoints
+    # ------------------------------------------------------------------
+
     @app.post("/api/import/cookies")
     def upload_youtube_cookies():
         """Accept a cookies.txt file and save it to the data directory."""
@@ -1717,6 +1735,85 @@ def create_app(test_config: dict | None = None) -> Flask:
                 }
             )
         return redirect(url_for("home", notice="YouTube cookies updated."))
+
+    @app.post("/api/import/cookies/token")
+    def generate_cookie_upload_token():
+        """Generate a one-time token for uploading cookies from a local script.
+
+        Owner access required. Token expires after 10 minutes.
+        Returns JSON: {"ok": True, "token": "<token>", "expires_in": 600}
+        """
+        require_owner_access()
+        _prune_expired_cookie_tokens()
+        token = secrets.token_urlsafe(24)
+        _cookie_upload_tokens[token] = time.time() + 600  # 10 min expiry
+        return jsonify(
+            {
+                "ok": True,
+                "token": token,
+                "expires_in": 600,
+            }
+        )
+
+    @app.post("/api/import/cookies/token/<token>")
+    def upload_cookies_via_token(token: str):
+        """Accept raw cookies.txt content via a one-time token.
+
+        Request body: raw Netscape-format cookie text (Content-Type: text/plain).
+        Consumes the token — one-time use only.
+        """
+        _prune_expired_cookie_tokens()
+        expires_at = _cookie_upload_tokens.get(token)
+        if expires_at is None or time.time() >= expires_at:
+            return jsonify({"ok": False, "error": "Invalid or expired token."}), 401
+
+        raw = request.get_data(as_text=True)
+        if not raw or len(raw) < 50:
+            return jsonify({"ok": False, "error": "Cookie data too short."}), 400
+
+        first_line = raw.split("\n")[0].strip()
+        if not first_line.startswith("#"):
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Invalid format — must be Netscape cookie file.",
+                }
+            ), 400
+
+        cookies_path = app.config["DATA_DIR"] / "cookies.txt"
+        cookies_path.write_text(raw, encoding="utf-8")
+
+        # Consume the token
+        _cookie_upload_tokens.pop(token, None)
+
+        return jsonify(
+            {
+                "ok": True,
+                "message": "YouTube cookies synced successfully.",
+            }
+        )
+
+    @app.get("/api/import/cookies/sync-script")
+    def download_cookie_sync_script():
+        """Serve the cookie sync Python script with SongWalk URL pre-filled."""
+        require_owner_access()
+        token = secrets.token_urlsafe(24)
+        _cookie_upload_tokens[token] = time.time() + 600
+        base_url = (request.host_url + owner_path()).rstrip("/")
+
+        script_path = Path(__file__).resolve().parent.parent / "sync_youtube_cookies.py"
+        if not script_path.exists():
+            return jsonify({"ok": False, "error": "Sync script not found."}), 404
+
+        return app.response_class(
+            script_path.read_text(encoding="utf-8"),
+            mimetype="application/x-python",
+            headers={
+                "Content-Disposition": "attachment; filename=sync_youtube_cookies.py",
+                "X-Cookie-Token": token,
+                "X-SongWalk-URL": base_url,
+            },
+        )
 
     @app.get("/email/test/<owner_token>")
     def email_test_send(owner_token: str):

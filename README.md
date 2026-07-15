@@ -15,8 +15,6 @@ SongWalk is a self-hosted music dropbox. Create libraries, share them with a lin
 [![Live](https://img.shields.io/badge/live-songwalk.tekonline.com.au-blue)](https://songwalk.tekonline.com.au)
 [![CI](https://img.shields.io/badge/CI-Drone%20CI-brightgreen)](https://ci.jobsight.tekonline.com.au)
 
-The product branding is `SongWalk`. The current module names, commands, and environment variables still use the existing `songwalk` and `SONGWALK_*` identifiers.
-
 ## Quick Start
 
 If you are on Windows and have the packaged desktop build, the shortest path is now:

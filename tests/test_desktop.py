@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from songshare.desktop import public_owner_dashboard_is_ready, public_owner_dashboard_url, wait_for_owner_dashboard_url
-from songshare.quick_tunnel import QuickTunnelStatus
+from songwalk.desktop import public_owner_dashboard_is_ready, public_owner_dashboard_url, wait_for_owner_dashboard_url
+from songwalk.quick_tunnel import QuickTunnelStatus
 
 
 class FakeQuickTunnelManager:
@@ -62,7 +62,7 @@ class DesktopRuntimeTestCase(unittest.TestCase):
             )
         )
 
-        with patch("songshare.desktop.public_owner_dashboard_is_ready", side_effect=[False, True]):
+        with patch("songwalk.desktop.public_owner_dashboard_is_ready", side_effect=[False, True]):
             self.assertEqual(
                 wait_for_owner_dashboard_url(runtime, timeout_seconds=1.0),
                 "https://demo.trycloudflare.com/owner/local-token",
@@ -102,8 +102,8 @@ class DesktopRuntimeTestCase(unittest.TestCase):
             )
         )
 
-        with patch("songshare.desktop.socket.getaddrinfo", return_value=[object()]):
-            with patch("songshare.desktop.urlopen") as mocked_urlopen:
+        with patch("songwalk.desktop.socket.getaddrinfo", return_value=[object()]):
+            with patch("songwalk.desktop.urlopen") as mocked_urlopen:
                 mocked_urlopen.return_value.__enter__.return_value.status = 200
                 self.assertTrue(public_owner_dashboard_is_ready(runtime))
 
@@ -121,7 +121,7 @@ class DesktopRuntimeTestCase(unittest.TestCase):
             )
         )
 
-        with patch("songshare.desktop.public_owner_dashboard_is_ready", return_value=False):
+        with patch("songwalk.desktop.public_owner_dashboard_is_ready", return_value=False):
             self.assertEqual(
                 wait_for_owner_dashboard_url(runtime, timeout_seconds=0.3),
                 "http://localhost:8080/owner/local-token",

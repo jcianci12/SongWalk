@@ -1,5 +1,5 @@
 param(
-  [string]$ContainerName = "songshare-cloudflared"
+  [string]$ContainerName = "songwalk-cloudflared"
 )
 
 $ErrorActionPreference = "Stop"

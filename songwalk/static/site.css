@@ -1986,14 +1986,14 @@ body.is-busy {
   border: 3px solid #bfd4ea;
   border-top-color: var(--accent-strong);
   border-radius: 999px;
-  animation: songshare-spin 0.8s linear infinite;
+  animation: songwalk-spin 0.8s linear infinite;
 }
 
 audio {
   display: none;
 }
 
-@keyframes songshare-spin {
+@keyframes songwalk-spin {
   to {
     transform: rotate(360deg);
   }

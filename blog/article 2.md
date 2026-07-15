@@ -102,7 +102,7 @@ In other words, the technical complexity had to stay under the hood.
 
 Plenty of self-hosted software is powerful. Far less of it is welcoming.
 
-SongWalk had to bridge that gap. It needed to work for the person who wants to run `python -m songshare`, for the person who prefers Docker, and for the person who just wants the thing online and shareable without reading a small novel first.
+SongWalk had to bridge that gap. It needed to work for the person who wants to run `python -m songwalk`, for the person who prefers Docker, and for the person who just wants the thing online and shareable without reading a small novel first.
 
 That is why packaging, startup flow, dependency bundling, and quick-share scripts matter so much here. Ease of use was not a cosmetic extra. It was one of the main engineering goals.
 

@@ -2,24 +2,24 @@ param(
   [ValidateSet("", "docker", "python", IgnoreCase = $true)]
   [string]$Runtime = "",
   [int]$Port = 8080,
-  [string]$ProjectName = "songshare",
-  [string]$TunnelContainerName = "songshare-cloudflared",
+  [string]$ProjectName = "songwalk",
+  [string]$TunnelContainerName = "songwalk-cloudflared",
   [int]$StartupWaitSeconds = 60,
   [int]$TunnelWaitSeconds = 25
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not $PSBoundParameters.ContainsKey("Port") -and $env:SONGSHARE_PUBLISHED_PORT) {
-  $Port = [int]$env:SONGSHARE_PUBLISHED_PORT
+if (-not $PSBoundParameters.ContainsKey("Port") -and $env:SONGWALK_PUBLISHED_PORT) {
+  $Port = [int]$env:SONGWALK_PUBLISHED_PORT
 }
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$DataDir = Join-Path $RepoRoot "songshare-data"
+$DataDir = Join-Path $RepoRoot "songwalk-data"
 $RuntimeDir = Join-Path $DataDir "runtime"
-$StdoutLog = Join-Path $RuntimeDir "songshare-python.stdout.log"
-$StderrLog = Join-Path $RuntimeDir "songshare-python.stderr.log"
-$PidFile = Join-Path $RuntimeDir "songshare-python.pid"
+$StdoutLog = Join-Path $RuntimeDir "songwalk-python.stdout.log"
+$StderrLog = Join-Path $RuntimeDir "songwalk-python.stderr.log"
+$PidFile = Join-Path $RuntimeDir "songwalk-python.pid"
 $OwnerUrlFile = Join-Path $DataDir "owner-url.txt"
 
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
@@ -134,7 +134,7 @@ function Choose-Runtime {
   }
 }
 
-function Test-SongshareReady {
+function Test-songwalkReady {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Url
@@ -142,7 +142,7 @@ function Test-SongshareReady {
 
   try {
     $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3
-    return $response.Content -match "SongWalk|Songshare"
+    return $response.Content -match "SongWalk|songwalk"
   }
   catch {
     return $false
@@ -181,7 +181,7 @@ function Show-PythonLogs {
   }
 }
 
-function Wait-ForSongshare {
+function Wait-Forsongwalk {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Url,
@@ -193,7 +193,7 @@ function Wait-ForSongshare {
   $deadline = (Get-Date).AddSeconds($WaitSeconds)
 
   while ((Get-Date) -lt $deadline) {
-    if (Test-SongshareReady -Url $Url) {
+    if (Test-songwalkReady -Url $Url) {
       return
     }
 
@@ -279,13 +279,13 @@ function Start-PythonRuntime {
   )
 
   $localUrl = "http://127.0.0.1:$LocalPort/"
-  if (Test-SongshareReady -Url $localUrl) {
+  if (Test-songwalkReady -Url $localUrl) {
     # Restart the tracked Python app so code changes are picked up on every deploy.
     Stop-PythonRuntime
   }
 
   $python = Resolve-PythonLaunch
-  $importCheck = Invoke-Captured -FilePath $python.FilePath -Arguments ($python.Arguments + @("-c", "import songshare"))
+  $importCheck = Invoke-Captured -FilePath $python.FilePath -Arguments ($python.Arguments + @("-c", "import songwalk"))
   if ($importCheck.ExitCode -ne 0) {
     Fail -Message "Python could not import the SongWalk app." -Details @(
       "Tried: $($python.DisplayName)",
@@ -297,32 +297,32 @@ function Start-PythonRuntime {
   Remove-Item -LiteralPath $StdoutLog, $StderrLog -Force -ErrorAction SilentlyContinue
 
   Write-Host "Starting SongWalk with $($python.DisplayName)..."
-  $previousSongsharePort = $env:SONGSHARE_PORT
-  $env:SONGSHARE_PORT = [string]$LocalPort
+  $previoussongwalkPort = $env:SONGWALK_PORT
+  $env:SONGWALK_PORT = [string]$LocalPort
   $process = Start-Process `
     -FilePath $python.FilePath `
-    -ArgumentList ($python.Arguments + @("-m", "songshare")) `
+    -ArgumentList ($python.Arguments + @("-m", "songwalk")) `
     -WorkingDirectory $RepoRoot `
     -RedirectStandardOutput $StdoutLog `
     -RedirectStandardError $StderrLog `
     -PassThru
-  if ($null -eq $previousSongsharePort) {
-    Remove-Item Env:\SONGSHARE_PORT -ErrorAction SilentlyContinue
+  if ($null -eq $previoussongwalkPort) {
+    Remove-Item Env:\SONGWALK_PORT -ErrorAction SilentlyContinue
   }
   else {
-    $env:SONGSHARE_PORT = $previousSongsharePort
+    $env:SONGWALK_PORT = $previoussongwalkPort
   }
 
   Set-Content -Path $PidFile -Value $process.Id -Encoding ascii
-  Wait-ForSongshare -Url $localUrl -WaitSeconds $StartupWaitSeconds -Process $process -FailureHint "Inspect logs in $StdoutLog and $StderrLog."
+  Wait-Forsongwalk -Url $localUrl -WaitSeconds $StartupWaitSeconds -Process $process -FailureHint "Inspect logs in $StdoutLog and $StderrLog."
   return $process
 }
 
 function Show-DockerComposeLogs {
-  $logs = Invoke-Captured -FilePath "docker" -Arguments @("compose", "logs", "--tail=80", "songshare")
+  $logs = Invoke-Captured -FilePath "docker" -Arguments @("compose", "logs", "--tail=80", "songwalk")
   if (-not [string]::IsNullOrWhiteSpace($logs.Output)) {
     Write-Host ""
-    Write-Host "docker compose logs --tail=80 songshare"
+    Write-Host "docker compose logs --tail=80 songwalk"
     Write-Host $logs.Output
   }
 }
@@ -336,14 +336,14 @@ function Start-DockerRuntime {
   $localUrl = "http://127.0.0.1:$LocalPort/"
   # Always rebuild in docker mode so the published port reflects the current tree.
   Write-Host "Starting SongWalk with Docker Compose..."
-  $previousPublishedPort = $env:SONGSHARE_PUBLISHED_PORT
-  $env:SONGSHARE_PUBLISHED_PORT = [string]$LocalPort
+  $previousPublishedPort = $env:SONGWALK_PUBLISHED_PORT
+  $env:SONGWALK_PUBLISHED_PORT = [string]$LocalPort
   $result = Invoke-Captured -FilePath "docker" -Arguments @("compose", "up", "--build", "-d")
   if ($null -eq $previousPublishedPort) {
-    Remove-Item Env:\SONGSHARE_PUBLISHED_PORT -ErrorAction SilentlyContinue
+    Remove-Item Env:\SONGWALK_PUBLISHED_PORT -ErrorAction SilentlyContinue
   }
   else {
-    $env:SONGSHARE_PUBLISHED_PORT = $previousPublishedPort
+    $env:SONGWALK_PUBLISHED_PORT = $previousPublishedPort
   }
   if ($result.ExitCode -ne 0) {
     Fail -Message "docker compose up failed." -Details @($result.Output)
@@ -351,14 +351,14 @@ function Start-DockerRuntime {
 
   $deadline = (Get-Date).AddSeconds($StartupWaitSeconds)
   while ((Get-Date) -lt $deadline) {
-    if (Test-SongshareReady -Url $localUrl) {
+    if (Test-songwalkReady -Url $localUrl) {
       return
     }
     Start-Sleep -Seconds 1
   }
 
   Show-DockerComposeLogs
-  Fail -Message "Timed out waiting for SongWalk at $localUrl." -Details @("Inspect 'docker compose logs --tail=80 songshare' for details.")
+  Fail -Message "Timed out waiting for SongWalk at $localUrl." -Details @("Inspect 'docker compose logs --tail=80 songwalk' for details.")
 }
 
 function Start-QuickTunnel {
@@ -378,7 +378,7 @@ function Start-QuickTunnel {
   $dockerArgs = @("run", "-d", "--name", $TunnelContainerName)
   if ($SelectedRuntime -eq "docker") {
     $dockerArgs += @("--network", "${ProjectName}_default")
-    $serviceUrl = "http://songshare:8080"
+    $serviceUrl = "http://songwalk:8080"
   }
   else {
     $dockerArgs += @("--add-host", "host.docker.internal:host-gateway")

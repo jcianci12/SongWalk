@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from songshare.album_lookup import LookupError, MusicMetadataClient
+from songwalk.album_lookup import LookupError, MusicMetadataClient
 
 
 class StubMusicMetadataClient(MusicMetadataClient):
     def __init__(self) -> None:
-        super().__init__(user_agent="Songshare-Test/0.1")
+        super().__init__(user_agent="songwalk-Test/0.1")
         self.recording_queries: list[str] = []
 
     def _search_releases(self, query: str, limit: int) -> list[dict]:
@@ -47,7 +47,7 @@ class StubMusicMetadataClient(MusicMetadataClient):
 
 class ReleaseLookupBudgetClient(MusicMetadataClient):
     def __init__(self) -> None:
-        super().__init__(user_agent="Songshare-Test/0.1")
+        super().__init__(user_agent="songwalk-Test/0.1")
         self.release_ids: list[str] = []
 
     def _search_releases(self, query: str, limit: int) -> list[dict]:
@@ -84,7 +84,7 @@ class ReleaseLookupBudgetClient(MusicMetadataClient):
 
 class MusicMetadataClientTestCase(unittest.TestCase):
     def test_requires_two_fields_for_lookup(self) -> None:
-        client = MusicMetadataClient(user_agent="Songshare-Test/0.1")
+        client = MusicMetadataClient(user_agent="songwalk-Test/0.1")
 
         with self.assertRaises(LookupError):
             client.search_release_candidates(title="Against All Odds", artist="", album="")

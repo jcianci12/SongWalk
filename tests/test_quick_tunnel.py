@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from songshare.quick_tunnel import QuickTunnelManager
+from songwalk.quick_tunnel import QuickTunnelManager
 
 
 class _BlockingStdout:

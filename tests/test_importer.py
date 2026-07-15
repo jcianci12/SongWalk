@@ -6,17 +6,17 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from songshare.importer import ImportError
+from songwalk.importer import ImportError
 from mutagen.id3 import ID3
 
-from songshare.album_lookup import LookupCandidate
-from songshare.importer import LibraryImportService
-from songshare.store import Store, UploadedTrack
+from songwalk.album_lookup import LookupCandidate
+from songwalk.importer import LibraryImportService
+from songwalk.store import Store, UploadedTrack
 
 
 def _resolve_test_tmp_root() -> Path:
     for candidate in (
-        Path.home() / ".codex" / "memories" / "songshare-tests",
+        Path.home() / ".codex" / "memories" / "songwalk-tests",
         Path(__file__).resolve().parents[1] / ".tmp-tests",
     ):
         try:
@@ -125,7 +125,7 @@ class ImportServiceTestCase(unittest.TestCase):
             youtube_command="yt-dlp",
         )
 
-        with mock.patch("songshare.importer._resolve_ffmpeg_args", return_value=["--ffmpeg-location", "ffmpeg"]):
+        with mock.patch("songwalk.importer._resolve_ffmpeg_args", return_value=["--ffmpeg-location", "ffmpeg"]):
             outcome = service.import_youtube_url(library.id, "https://www.youtube.com/watch?v=demo")
 
         self.assertTrue(outcome.ok)
@@ -149,7 +149,7 @@ class ImportServiceTestCase(unittest.TestCase):
             spotify_command="spotdl",
         )
 
-        with mock.patch("songshare.importer._resolve_ffmpeg_args", return_value=["--ffmpeg", "ffmpeg"]):
+        with mock.patch("songwalk.importer._resolve_ffmpeg_args", return_value=["--ffmpeg", "ffmpeg"]):
             outcome = service.import_spotify_url(library.id, "https://open.spotify.com/track/demo")
 
         self.assertTrue(outcome.ok)
@@ -267,7 +267,7 @@ class ImportServiceTestCase(unittest.TestCase):
 
         with self.assertRaisesRegex(
             ImportError,
-            "Spotify search requires SONGSHARE_SPOTIFY_CLIENT_ID and SONGSHARE_SPOTIFY_CLIENT_SECRET.",
+            "Spotify search requires SONGWALK_SPOTIFY_CLIENT_ID and SONGWALK_SPOTIFY_CLIENT_SECRET.",
         ):
             service.search_spotify("demo song")
 

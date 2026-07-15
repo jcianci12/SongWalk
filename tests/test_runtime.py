@@ -7,12 +7,12 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from songshare.runtime import ensure_portable_data_dir, prepare_runtime, resolve_cloudflared_binary, resolve_quick_tunnel_enabled
+from songwalk.runtime import ensure_portable_data_dir, prepare_runtime, resolve_cloudflared_binary, resolve_quick_tunnel_enabled
 
 
 def _resolve_test_tmp_root() -> Path:
     for candidate in (
-        Path.home() / ".codex" / "memories" / "songshare-tests",
+        Path.home() / ".codex" / "memories" / "songwalk-tests",
         Path(__file__).resolve().parents[1] / ".tmp-tests",
     ):
         try:
@@ -33,7 +33,7 @@ def new_test_dir() -> Path:
     return path
 
 
-class SongshareRuntimeTestCase(unittest.TestCase):
+class songwalkRuntimeTestCase(unittest.TestCase):
     def test_ensure_portable_data_dir_uses_executable_folder_when_frozen(self) -> None:
         temp_dir = new_test_dir()
         executable = temp_dir / "SongWalk.exe"
@@ -44,7 +44,7 @@ class SongshareRuntimeTestCase(unittest.TestCase):
                 with patch.object(sys, "executable", str(executable)):
                     data_dir = ensure_portable_data_dir()
 
-        self.assertEqual(data_dir, temp_dir / "songshare-data")
+        self.assertEqual(data_dir, temp_dir / "songwalk-data")
 
     def test_prepare_runtime_writes_owner_url_file(self) -> None:
         temp_dir = new_test_dir()
@@ -52,8 +52,8 @@ class SongshareRuntimeTestCase(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "SONGSHARE_DATA_DIR": str(temp_dir),
-                "SONGSHARE_PORT": "8097",
+                "SONGWALK_DATA_DIR": str(temp_dir),
+                "SONGWALK_PORT": "8097",
             },
             clear=True,
         ):
@@ -87,7 +87,7 @@ class SongshareRuntimeTestCase(unittest.TestCase):
         self.assertTrue(enabled)
 
     def test_resolve_quick_tunnel_enabled_respects_explicit_off_value(self) -> None:
-        with patch.dict(os.environ, {"SONGSHARE_QUICK_TUNNEL_ENABLED": "0"}, clear=True):
+        with patch.dict(os.environ, {"SONGWALK_QUICK_TUNNEL_ENABLED": "0"}, clear=True):
             with patch.object(sys, "frozen", True, create=True):
                 enabled = resolve_quick_tunnel_enabled()
 

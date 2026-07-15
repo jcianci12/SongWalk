@@ -69,7 +69,7 @@ class ImportJobManager:
         thread = threading.Thread(
             target=self._run_job,
             args=(job.id, redirect_url, worker),
-            name=f"songshare-import-{job.id[:8]}",
+            name=f"songwalk-import-{job.id[:8]}",
             daemon=True,
         )
         thread.start()

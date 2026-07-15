@@ -8,7 +8,7 @@
       return;
     }
 
-    window.console.log(`[Songshare ${SCRIPT_VERSION}] ${scope}`, ...details);
+    window.console.log(`[songwalk ${SCRIPT_VERSION}] ${scope}`, ...details);
   }
 
   window.__SONGWALK_SCRIPT_VERSION = SCRIPT_VERSION;

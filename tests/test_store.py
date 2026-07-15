@@ -7,12 +7,12 @@ from pathlib import Path
 
 from mutagen.id3 import ID3
 
-from songshare.store import Store, UploadedTrack
+from songwalk.store import Store, UploadedTrack
 
 
 def _resolve_test_tmp_root() -> Path:
     for candidate in (
-        Path.home() / ".codex" / "memories" / "songshare-tests",
+        Path.home() / ".codex" / "memories" / "songwalk-tests",
         Path(__file__).resolve().parents[1] / ".tmp-tests",
     ):
         try:

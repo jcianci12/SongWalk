@@ -11,13 +11,13 @@ Key constraint:
 Practical approach:
 1. Obtain one specific legacy visualization file/plugin as a sample.
 2. Identify whether it is a data format or a native binary.
-3. If it is data, document the structure and map it into a Songshare-native preset schema.
+3. If it is data, document the structure and map it into a songwalk-native preset schema.
 4. If it is native code, extract only portable assets/metadata where possible and manually recreate the effect on canvas/WebGL.
-5. Prefer a Songshare-native WMP-inspired preset format over literal compatibility.
+5. Prefer a songwalk-native WMP-inspired preset format over literal compatibility.
 
 ## Upload-Time Embedded Metadata And Art Expansion
 
-Extend upload-time metadata extraction beyond MP3 so Songshare can pull album/title/artist data and embedded cover art from more formats during ingest.
+Extend upload-time metadata extraction beyond MP3 so songwalk can pull album/title/artist data and embedded cover art from more formats during ingest.
 
 Scope:
 1. Add support for `m4a` embedded metadata and cover art extraction at upload time.

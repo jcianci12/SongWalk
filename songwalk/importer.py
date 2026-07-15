@@ -106,10 +106,10 @@ class LibraryImportService:
         self._youtube_command = youtube_command.strip() if youtube_command else ""
         self._spotify_command = spotify_command.strip() if spotify_command else ""
         self._spotify_client_id = (
-            spotify_client_id or os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "")
+            spotify_client_id or os.getenv("SONGWALK_SPOTIFY_CLIENT_ID", "")
         ).strip()
         self._spotify_client_secret = (
-            spotify_client_secret or os.getenv("SONGSHARE_SPOTIFY_CLIENT_SECRET", "")
+            spotify_client_secret or os.getenv("SONGWALK_SPOTIFY_CLIENT_SECRET", "")
         ).strip()
         self._spotify_access_token = ""
         self._spotify_access_token_expires_at = 0.0
@@ -208,7 +208,7 @@ class LibraryImportService:
             raise ImportError("Enter at least two characters to search Spotify.")
         if not self._spotify_client_id or not self._spotify_client_secret:
             raise ImportError(
-                "Spotify search requires SONGSHARE_SPOTIFY_CLIENT_ID and SONGSHARE_SPOTIFY_CLIENT_SECRET."
+                "Spotify search requires SONGWALK_SPOTIFY_CLIENT_ID and SONGWALK_SPOTIFY_CLIENT_SECRET."
             )
 
         payload = self._spotify_request_json(
@@ -472,7 +472,7 @@ class LibraryImportService:
         if cookies_path and os.path.isfile(cookies_path):
             return ["--cookies", cookies_path]
         # Also check the data dir for a cookies.txt file
-        data_dir = os.getenv("SONGSHARE_DATA_DIR", "./songshare-data")
+        data_dir = os.getenv("SONGWALK_DATA_DIR", "./songwalk-data")
         fallback = os.path.join(data_dir, "cookies.txt")
         if os.path.isfile(fallback):
             return ["--cookies", fallback]

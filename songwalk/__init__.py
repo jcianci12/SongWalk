@@ -155,19 +155,19 @@ class ImportJobStore:
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
 
-    data_dir = Path(os.getenv("SONGSHARE_DATA_DIR", "./songshare-data"))
-    max_upload_mb = int(os.getenv("SONGSHARE_MAX_UPLOAD_MB", "512"))
-    proxy_hops = max(0, int(os.getenv("SONGSHARE_PROXY_HOPS", "0")))
-    dev_mode = os.getenv("SONGSHARE_DEV", "").lower() in {"1", "true", "yes", "on"}
+    data_dir = Path(os.getenv("SONGWALK_DATA_DIR", "./songwalk-data"))
+    max_upload_mb = int(os.getenv("SONGWALK_MAX_UPLOAD_MB", "512"))
+    proxy_hops = max(0, int(os.getenv("SONGWALK_PROXY_HOPS", "0")))
+    dev_mode = os.getenv("SONGWALK_DEV", "").lower() in {"1", "true", "yes", "on"}
 
     app.config.from_mapping(
         DATA_DIR=data_dir,
-        BASE_URL=os.getenv("SONGSHARE_BASE_URL", "").rstrip("/"),
+        BASE_URL=os.getenv("SONGWALK_BASE_URL", "").rstrip("/"),
         DEV_MODE=dev_mode,
         MAX_UPLOAD_MB=max_upload_mb,
         MAX_CONTENT_LENGTH=max_upload_mb * 1024 * 1024,
         PROXY_HOPS=proxy_hops,
-        QUICK_TUNNEL_ENABLED=os.getenv("SONGSHARE_QUICK_TUNNEL_ENABLED", "").lower()
+        QUICK_TUNNEL_ENABLED=os.getenv("SONGWALK_QUICK_TUNNEL_ENABLED", "").lower()
         in {"1", "true", "yes", "on"},
     )
 
@@ -198,18 +198,18 @@ def create_app(test_config: dict | None = None) -> Flask:
         LibraryImportService(
             store=store,
             lookup_client=app.config["LOOKUP_CLIENT"],
-            youtube_command=os.getenv("SONGSHARE_YOUTUBE_DL_BIN", "").strip() or None,
-            spotify_command=os.getenv("SONGSHARE_SPOTIFY_DL_BIN", "").strip() or None,
-            spotify_client_id=os.getenv("SONGSHARE_SPOTIFY_CLIENT_ID", "").strip()
+            youtube_command=os.getenv("SONGWALK_YOUTUBE_DL_BIN", "").strip() or None,
+            spotify_command=os.getenv("SONGWALK_SPOTIFY_DL_BIN", "").strip() or None,
+            spotify_client_id=os.getenv("SONGWALK_SPOTIFY_CLIENT_ID", "").strip()
             or None,
             spotify_client_secret=os.getenv(
-                "SONGSHARE_SPOTIFY_CLIENT_SECRET", ""
+                "SONGWALK_SPOTIFY_CLIENT_SECRET", ""
             ).strip()
             or None,
         ),
     )
     owner_token_path = app.config["DATA_DIR"] / "owner-token.txt"
-    owner_token = os.getenv("SONGSHARE_OWNER_TOKEN", "").strip()
+    owner_token = os.getenv("SONGWALK_OWNER_TOKEN", "").strip()
     if not owner_token:
         if owner_token_path.exists():
             owner_token = owner_token_path.read_text(encoding="utf-8").strip()
@@ -277,7 +277,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             (request.view_args or {}).get("owner_token")
             or request.form.get("owner_token", "")
             or request.args.get("owner_token", "")
-            or request.headers.get("X-Songshare-Owner-Token", "")
+            or request.headers.get("X-songwalk-Owner-Token", "")
         )
 
     def is_direct_local_request() -> bool:
@@ -668,7 +668,7 @@ def create_app(test_config: dict | None = None) -> Flask:
 
         threading.Thread(
             target=worker,
-            name=f"songshare-import-{job.id}",
+            name=f"songwalk-import-{job.id}",
             daemon=True,
         ).start()
         return job
@@ -1859,7 +1859,7 @@ class DevChangeMonitor:
             return
 
         self._thread = threading.Thread(
-            target=self._watch_loop, name="songshare-dev-watch", daemon=True
+            target=self._watch_loop, name="songwalk-dev-watch", daemon=True
         )
         self._thread.start()
 

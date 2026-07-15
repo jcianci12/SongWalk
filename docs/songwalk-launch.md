@@ -1,6 +1,6 @@
 # SongWalk Launch Brief
 
-SongWalk is a retro-inspired music dropbox for friends, collaborators, and families who need to share libraries without the noise of mainstream cloud storage. The new `SongWalk` brand keeps the same battle-tested `songshare` backend but wraps it in a polished AV-style skin, a fresh logo, and a single-cross-platform quick-share script that covers both local Python and Docker deployments.
+SongWalk is a retro-inspired music dropbox for friends, collaborators, and families who need to share libraries without the noise of mainstream cloud storage. The new `SongWalk` brand keeps the same battle-tested `songwalk` backend but wraps it in a polished AV-style skin, a fresh logo, and a single-cross-platform quick-share script that covers both local Python and Docker deployments.
 
 ## Why SongWalk?
 
@@ -16,7 +16,7 @@ SongWalk is a retro-inspired music dropbox for friends, collaborators, and famil
 3. Choose “docker” or “python” when prompted; the launcher will start SongWalk, wait for the HTTP port, then bring up the Quick Tunnel.
 4. Copy the “Public URL” output and send `/s/<library-id>` links to collaborators. The launcher also prints the private owner dashboard path for management.
 
-Optional: set `SONGSHARE_BASE_URL` if you are proxying through nginx or another reverse proxy. The repo already includes a sample `deploy/nginx/songshare.conf`.
+Optional: set `SONGWALK_BASE_URL` if you are proxying through nginx or another reverse proxy. The repo already includes a sample `deploy/nginx/songwalk.conf`.
 
 ## Spread the word
 

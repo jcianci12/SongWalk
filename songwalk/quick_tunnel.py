@@ -137,7 +137,7 @@ class QuickTunnelManager:
                 reader = threading.Thread(
                     target=self._watch_process,
                     args=(process,),
-                    name="songshare-quick-tunnel",
+                    name="songwalk-quick-tunnel",
                     daemon=True,
                 )
                 reader.start()

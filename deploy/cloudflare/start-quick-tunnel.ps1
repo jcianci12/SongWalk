@@ -1,8 +1,8 @@
 param(
-  [string]$ProjectName = "songshare",
+  [string]$ProjectName = "songwalk",
   [string]$NetworkName = "",
-  [string]$ServiceUrl = "http://songshare:8080",
-  [string]$ContainerName = "songshare-cloudflared",
+  [string]$ServiceUrl = "http://songwalk:8080",
+  [string]$ContainerName = "songwalk-cloudflared",
   [string]$Image = "cloudflare/cloudflared:latest",
   [int]$WaitSeconds = 25
 )

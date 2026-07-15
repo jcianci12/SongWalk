@@ -2,18 +2,18 @@
 set -euo pipefail
 
 RUNTIME="${1:-}"
-PORT="${SONGSHARE_PUBLISHED_PORT:-8080}"
-PROJECT_NAME="songshare"
-TUNNEL_CONTAINER_NAME="songshare-cloudflared"
+PORT="${SONGWALK_PUBLISHED_PORT:-8080}"
+PROJECT_NAME="songwalk"
+TUNNEL_CONTAINER_NAME="songwalk-cloudflared"
 STARTUP_WAIT_SECONDS=60
 TUNNEL_WAIT_SECONDS=25
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DATA_DIR="$ROOT_DIR/songshare-data"
+DATA_DIR="$ROOT_DIR/songwalk-data"
 RUNTIME_DIR="$DATA_DIR/runtime"
-STDOUT_LOG="$RUNTIME_DIR/songshare-python.stdout.log"
-STDERR_LOG="$RUNTIME_DIR/songshare-python.stderr.log"
-PID_FILE="$RUNTIME_DIR/songshare-python.pid"
+STDOUT_LOG="$RUNTIME_DIR/songwalk-python.stdout.log"
+STDERR_LOG="$RUNTIME_DIR/songwalk-python.stderr.log"
+PID_FILE="$RUNTIME_DIR/songwalk-python.pid"
 OWNER_URL_FILE="$DATA_DIR/owner-url.txt"
 
 mkdir -p "$RUNTIME_DIR"
@@ -67,10 +67,10 @@ choose_runtime() {
   done
 }
 
-test_songshare_ready() {
+test_SONGWALK_ready() {
   local body
   body="$(curl -fsSL --max-time 3 -L "http://127.0.0.1:${PORT}/" 2>/dev/null || true)"
-  [[ "$body" == *SongWalk* || "$body" == *Songshare* ]]
+  [[ "$body" == *SongWalk* || "$body" == *songwalk* ]]
 }
 
 show_python_logs() {
@@ -79,7 +79,7 @@ show_python_logs() {
     stdout_tail="$(tail -n 40 "$STDOUT_LOG" 2>/dev/null || true)"
     [[ -z "$stdout_tail" ]] || {
       echo
-      echo "songshare stdout:"
+      echo "songwalk stdout:"
       echo "$stdout_tail"
     }
   fi
@@ -89,19 +89,19 @@ show_python_logs() {
     stderr_tail="$(tail -n 40 "$STDERR_LOG" 2>/dev/null || true)"
     [[ -z "$stderr_tail" ]] || {
       echo
-      echo "songshare stderr:"
+      echo "songwalk stderr:"
       echo "$stderr_tail"
     }
   fi
 }
 
-wait_for_songshare() {
+wait_for_songwalk() {
   local end_time="$((SECONDS + STARTUP_WAIT_SECONDS))"
   local pid="${1:-}"
   local failure_hint="${2:-}"
 
   while (( SECONDS < end_time )); do
-    if test_songshare_ready; then
+    if test_SONGWALK_ready; then
       return 0
     fi
 
@@ -161,7 +161,7 @@ stop_python_runtime() {
 }
 
 start_python_runtime() {
-  if test_songshare_ready; then
+  if test_SONGWALK_ready; then
     # Restart the tracked Python app so code changes are picked up on every deploy.
     stop_python_runtime
   fi
@@ -169,7 +169,7 @@ start_python_runtime() {
   local python_bin
   python_bin="$(resolve_python)"
   local import_output
-  if ! import_output="$(cd "$ROOT_DIR" && "$python_bin" -c 'import songshare' 2>&1)"; then
+  if ! import_output="$(cd "$ROOT_DIR" && "$python_bin" -c 'import songwalk' 2>&1)"; then
     fail "Python could not import the SongWalk app." "Tried: $python_bin" "$import_output" "Install dependencies with: pip install -r requirements.txt"
   fi
 
@@ -177,21 +177,21 @@ start_python_runtime() {
   echo "Starting SongWalk with ${python_bin}..."
   (
     cd "$ROOT_DIR"
-    SONGSHARE_PORT="$PORT" nohup "$python_bin" -m songshare >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    SONGWALK_PORT="$PORT" nohup "$python_bin" -m songwalk >"$STDOUT_LOG" 2>"$STDERR_LOG" &
     echo $! >"$PID_FILE"
   )
 
   local pid
   pid="$(cat "$PID_FILE")"
-  wait_for_songshare "$pid" "Inspect logs in $STDOUT_LOG and $STDERR_LOG."
+  wait_for_songwalk "$pid" "Inspect logs in $STDOUT_LOG and $STDERR_LOG."
 }
 
 show_docker_logs() {
   local logs
-  logs="$(cd "$ROOT_DIR" && docker compose logs --tail=80 songshare 2>&1 || true)"
+  logs="$(cd "$ROOT_DIR" && docker compose logs --tail=80 songwalk 2>&1 || true)"
   [[ -z "$logs" ]] || {
     echo
-    echo "docker compose logs --tail=80 songshare"
+    echo "docker compose logs --tail=80 songwalk"
     echo "$logs"
   }
 }
@@ -199,20 +199,20 @@ show_docker_logs() {
 start_docker_runtime() {
   # Always rebuild in docker mode so the published port reflects the current tree.
   echo "Starting SongWalk with Docker Compose..."
-  if ! (cd "$ROOT_DIR" && SONGSHARE_PUBLISHED_PORT="$PORT" docker compose up --build -d); then
+  if ! (cd "$ROOT_DIR" && SONGWALK_PUBLISHED_PORT="$PORT" docker compose up --build -d); then
     fail "docker compose up failed."
   fi
 
   local end_time="$((SECONDS + STARTUP_WAIT_SECONDS))"
   while (( SECONDS < end_time )); do
-    if test_songshare_ready; then
+    if test_SONGWALK_ready; then
       return
     fi
     sleep 1
   done
 
   show_docker_logs
-  fail "Timed out waiting for SongWalk at http://127.0.0.1:${PORT}/." "Inspect 'docker compose logs --tail=80 songshare' for details."
+  fail "Timed out waiting for SongWalk at http://127.0.0.1:${PORT}/." "Inspect 'docker compose logs --tail=80 songwalk' for details."
 }
 
 start_quick_tunnel() {
@@ -228,7 +228,7 @@ start_quick_tunnel() {
 
   if [[ "$selected_runtime" == "docker" ]]; then
     docker_args+=(--network "${PROJECT_NAME}_default")
-    service_url="http://songshare:8080"
+    service_url="http://songwalk:8080"
   else
     docker_args+=(--add-host host.docker.internal:host-gateway)
     service_url="http://host.docker.internal:${PORT}"

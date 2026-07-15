@@ -7,15 +7,15 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from songshare.album_lookup import LookupCandidate
-from songshare import create_app
-from songshare.importer import ImportOutcome
-from songshare.quick_tunnel import QuickTunnelStatus
+from songwalk.album_lookup import LookupCandidate
+from songwalk import create_app
+from songwalk.importer import ImportOutcome
+from songwalk.quick_tunnel import QuickTunnelStatus
 
 
 def _resolve_test_tmp_root() -> Path:
     for candidate in (
-        Path.home() / ".codex" / "memories" / "songshare-tests",
+        Path.home() / ".codex" / "memories" / "songwalk-tests",
         Path(__file__).resolve().parents[1] / ".tmp-tests",
     ):
         try:
@@ -149,7 +149,7 @@ class FakeQuickTunnelManager:
 
 
 def _uploaded_track(filename: str):
-    from songshare.store import UploadedTrack
+    from songwalk.store import UploadedTrack
 
     return UploadedTrack(
         filename=filename,
@@ -173,7 +173,7 @@ def wait_for_import_job(client, status_url: str) -> dict:
     return last_payload
 
 
-class SongshareAppTestCase(unittest.TestCase):
+class songwalkAppTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = new_test_dir()
         self.app = create_app(

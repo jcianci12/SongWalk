@@ -14,13 +14,13 @@ RUN apt-get update \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
-COPY songshare ./songshare
+COPY songwalk ./songwalk
 
-ENV SONGSHARE_HOST=0.0.0.0
-ENV SONGSHARE_PORT=8080
-ENV SONGSHARE_DATA_DIR=/data
+ENV SONGWALK_HOST=0.0.0.0
+ENV SONGWALK_PORT=8080
+ENV SONGWALK_DATA_DIR=/data
 
 EXPOSE 8080
 VOLUME ["/data"]
 
-CMD ["python", "-m", "songshare"]
+CMD ["python", "-m", "songwalk"]

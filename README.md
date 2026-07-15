@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/jcianci12/SongWalk">
-    <img src="songshare\images\Songwalk logo.png" alt="SongWalk logo" width="220">
+    <img src="songwalk\images\Songwalk logo.png" alt="SongWalk logo" width="220">
   </a>
 </p>
 
@@ -15,7 +15,7 @@ SongWalk is a self-hosted music dropbox. Create libraries, share them with a lin
 [![Live](https://img.shields.io/badge/live-songwalk.tekonline.com.au-blue)](https://songwalk.tekonline.com.au)
 [![CI](https://img.shields.io/badge/CI-Drone%20CI-brightgreen)](https://ci.jobsight.tekonline.com.au)
 
-The product branding is `SongWalk`. The current module names, commands, and environment variables still use the existing `songshare` and `SONGSHARE_*` identifiers.
+The product branding is `SongWalk`. The current module names, commands, and environment variables still use the existing `songwalk` and `SONGWALK_*` identifiers.
 
 ## Quick Start
 
@@ -81,7 +81,7 @@ Quick Tunnels are temporary and for demos/testing only.
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python -m songshare
+python -m songwalk
 ```
 
 Open `http://localhost:8080`.
@@ -94,12 +94,12 @@ For a local desktop executable, use the PyInstaller build path documented in [do
 
 The packaged Windows app now runs as a tray app:
 
-- turns Quick Tunnel on by default in the packaged desktop runtime unless you explicitly set `SONGSHARE_QUICK_TUNNEL_ENABLED=0`
+- turns Quick Tunnel on by default in the packaged desktop runtime unless you explicitly set `SONGWALK_QUICK_TUNNEL_ENABLED=0`
 - bundles `cloudflared.exe` next to `SongWalk.exe`, so the EXE can bring Cloudflare online without a separate machine-wide install
 - opens the owner dashboard on startup, waiting for the public owner page to become reachable before falling back to `localhost`
 - double-clicks to the owner dashboard, preferring the public tunnel URL over `localhost`
 - right-click for `Open owner dashboard`, `Open SongWalk`, `Open data folder`, and `Quit SongWalk`
-- when launched from the packaged build, `songshare-data/` defaults to a folder next to `SongWalk.exe` so the app stays portable
+- when launched from the packaged build, `songwalk-data/` defaults to a folder next to `SongWalk.exe` so the app stays portable
 
 The built executable lives at:
 
@@ -113,30 +113,30 @@ If you open root directly on `localhost`, SongWalk now shows a local launch page
 
 For public hosts, tunnels, and reverse proxies, root stays in share-access mode and does not reveal library IDs.
 
-SongWalk also writes a private owner URL to `songshare-data/owner-url.txt` for library management access.
+SongWalk also writes a private owner URL to `songwalk-data/owner-url.txt` for library management access.
 
 ## Dev Mode
 
 For automatic server restart and browser refresh while you edit Python, templates, CSS, or JS:
 
 ```powershell
-$env:SONGSHARE_DEV="1"
-python -m songshare
+$env:SONGWALK_DEV="1"
+python -m songwalk
 ```
 
 In dev mode SongWalk uses Flask's reloader, disables static asset caching, and refreshes open pages when watched files change.
 
 ## Configuration
 
-- `SONGSHARE_HOST`: Bind host, default `0.0.0.0`
-- `SONGSHARE_PORT`: Bind port, default `8080`
-- `SONGSHARE_DATA_DIR`: Storage root, default `./songshare-data`
-- `SONGSHARE_BASE_URL`: Optional public base URL used for share links
-- `SONGSHARE_DEV`: Enable development auto-reload mode, default `off`
-- `SONGSHARE_MAX_UPLOAD_MB`: Request size limit in MB, default `512`
-- `SONGSHARE_PROXY_HOPS`: Number of trusted reverse proxies to honor for forwarded host/proto headers, default `0`
-- `SONGSHARE_YOUTUBE_DL_BIN`: Optional override for the YouTube downloader command. Defaults to `yt-dlp` and falls back to `youtube-dl` if present.
-- `SONGSHARE_SPOTIFY_DL_BIN`: Optional override for the Spotify downloader command. Defaults to `spotdl`.
+- `SONGWALK_HOST`: Bind host, default `0.0.0.0`
+- `SONGWALK_PORT`: Bind port, default `8080`
+- `SONGWALK_DATA_DIR`: Storage root, default `./songwalk-data`
+- `SONGWALK_BASE_URL`: Optional public base URL used for share links
+- `SONGWALK_DEV`: Enable development auto-reload mode, default `off`
+- `SONGWALK_MAX_UPLOAD_MB`: Request size limit in MB, default `512`
+- `SONGWALK_PROXY_HOPS`: Number of trusted reverse proxies to honor for forwarded host/proto headers, default `0`
+- `SONGWALK_YOUTUBE_DL_BIN`: Optional override for the YouTube downloader command. Defaults to `yt-dlp` and falls back to `youtube-dl` if present.
+- `SONGWALK_SPOTIFY_DL_BIN`: Optional override for the Spotify downloader command. Defaults to `spotdl`.
 - `SONGWALK_SMTP_USERNAME`: SMTP username for magic link emails (PurelyMail)
 - `SONGWALK_SMTP_PASSWORD`: SMTP password for magic link emails
 - `SONGWALK_SMTP_FROM`: From address for magic link emails, defaults to `songwalk@tekonline.com.au`
@@ -148,7 +148,7 @@ In dev mode SongWalk uses Flask's reloader, disables static asset caching, and r
 docker compose up --build
 ```
 
-The compose file mounts `./songshare-data` into the container at `/data`, enables one trusted proxy hop so nginx/Traefik/Caddy can forward the public host and scheme cleanly, and turns on the built-in Quick Tunnel manager by default.
+The compose file mounts `./songwalk-data` into the container at `/data`, enables one trusted proxy hop so nginx/Traefik/Caddy can forward the public host and scheme cleanly, and turns on the built-in Quick Tunnel manager by default.
 
 For live-reload development inside Docker, use the dev override:
 
@@ -156,7 +156,7 @@ For live-reload development inside Docker, use the dev override:
 docker compose -f compose.yaml -f compose.dev.yaml up --build
 ```
 
-`compose.dev.yaml` enables `SONGSHARE_DEV=1`, keeps the Quick Tunnel manager enabled, and bind-mounts `./songshare` into `/app/songshare`, so Python, template, CSS, and JS edits are picked up without rebuilding the image each time.
+`compose.dev.yaml` enables `SONGWALK_DEV=1`, keeps the Quick Tunnel manager enabled, and bind-mounts `./songwalk` into `/app/songwalk`, so Python, template, CSS, and JS edits are picked up without rebuilding the image each time.
 
 The container image now includes `ffmpeg`, `yt-dlp`, and `spotdl`, so the `/import` page works inside Docker without extra setup.
 
@@ -170,7 +170,7 @@ SongWalk separates public share access from owner management:
 - `/s/<library-id>/import` is the dedicated import page for drag-and-drop, YouTube URLs, and Spotify URLs.
 - `/owner/<secret-token>` is the private owner dashboard for creating and deleting libraries.
 
-On startup, SongWalk writes the private owner URL to `songshare-data/owner-url.txt`. Keep that URL private.
+On startup, SongWalk writes the private owner URL to `songwalk-data/owner-url.txt`. Keep that URL private.
 
 This local-only convenience is intentionally limited to direct loopback requests and does not activate through Cloudflare tunnels or public reverse proxies.
 
@@ -191,7 +191,7 @@ Then open `http://localhost:8080/` locally. The launch page shows:
 - A button to bring SongWalk online or take it offline
 - A button to rotate the tunnel
 
-For the packaged Windows EXE, Quick Tunnel starts by default and the app opens the public owner page when it becomes reachable. For plain `python -m songshare`, Quick Tunnel startup is still optional. Install `cloudflared` yourself and set `SONGSHARE_QUICK_TUNNEL_ENABLED=1` if you want the same in-app behavior outside Docker.
+For the packaged Windows EXE, Quick Tunnel starts by default and the app opens the public owner page when it becomes reachable. For plain `python -m songwalk`, Quick Tunnel startup is still optional. Install `cloudflared` yourself and set `SONGWALK_QUICK_TUNNEL_ENABLED=1` if you want the same in-app behavior outside Docker.
 
 Quick Tunnels are for testing and demos only. They are temporary, have a limit of 200 in-flight requests, and do not support Server-Sent Events.
 
@@ -206,7 +206,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\cloudflare\stop-quick-tunnel.p
 Or:
 
 ```bash
-docker rm -f songshare-cloudflared
+docker rm -f songwalk-cloudflared
 ```
 
 ### ngrok
@@ -215,9 +215,9 @@ docker rm -f songshare-cloudflared
 
 ## Reverse Proxy (nginx)
 
-If nginx terminates TLS and proxies traffic to SongWalk, keep `SONGSHARE_PROXY_HOPS=1` and forward the usual headers.
+If nginx terminates TLS and proxies traffic to SongWalk, keep `SONGWALK_PROXY_HOPS=1` and forward the usual headers.
 
-A ready-to-adapt example config is included at `deploy/nginx/songshare.conf`:
+A ready-to-adapt example config is included at `deploy/nginx/songwalk.conf`:
 
 ```nginx
 server {
@@ -246,11 +246,11 @@ server {
 }
 ```
 
-In that setup, SongWalk can usually leave `SONGSHARE_BASE_URL` empty and derive the correct public share URL from forwarded headers. Set `SONGSHARE_BASE_URL` only if you want to force one canonical external URL.
+In that setup, SongWalk can usually leave `SONGWALK_BASE_URL` empty and derive the correct public share URL from forwarded headers. Set `SONGWALK_BASE_URL` only if you want to force one canonical external URL.
 
-If you are running the Windows executable or `python -m songshare` behind nginx instead of Docker, export the same proxy setting before launch:
+If you are running the Windows executable or `python -m songwalk` behind nginx instead of Docker, export the same proxy setting before launch:
 
 ```powershell
-$env:SONGSHARE_PROXY_HOPS="1"
-python -m songshare
+$env:SONGWALK_PROXY_HOPS="1"
+python -m songwalk
 ```

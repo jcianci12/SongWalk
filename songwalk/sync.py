@@ -14,6 +14,12 @@ _room_peers: dict[str, set[str]] = defaultdict(set)
 # Store last sync state per room for HTTP polling fallback
 _room_sync_state: dict[str, dict] = {}
 
+# Anchor client per room — first client to join is the timing authority
+_room_anchor: dict[str, str] = {}  # room -> anchor_sid
+_room_anchor_offset: dict[
+    str, float
+] = {}  # room -> anchor's clock offset from server (seconds)
+
 
 def _room_for(library_id: str) -> str:
     return f"sync:{library_id}"
@@ -96,7 +102,8 @@ def init_sync(app):
             return
         room = _room_for(library_id)
         data["peer_id"] = request.sid
-        data["timestamp"] = time.time()
+        # Server is the universal clock source — stamp with server time
+        data["server_time"] = time.time()
         # Store for HTTP polling fallback
         _room_sync_state[room] = data
         emit("sync_state", data, to=room, include_self=False)

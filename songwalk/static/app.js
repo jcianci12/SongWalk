@@ -4385,7 +4385,7 @@
       }
     }
 
-    var lastSyncAnchor = { position: 0, time: 0 };  // position + wall-clock timestamp
+    var lastSyncAnchor = { position: 0, serverTime: 0 };  // server-anchored reference
 
     function syncWithRemoteState(data) {
       if (!player || !player.src) return;
@@ -4393,39 +4393,42 @@
       var currentTrack = trackStateFromRow(currentPlaybackRow());
       if (!currentTrack || currentTrack.id !== data.track_id) return;
 
-      // Instead of comparing raw positions (which causes jumps),
-      // compare against the expected position based on our last sync anchor.
-      // Only seek if we've genuinely drifted, not just because clocks differ.
       var remotePos = data.position || 0;
-      var now = Date.now();
+      var serverTime = data.server_time || 0;
 
-      // If this is a new anchor or we've changed tracks, reset
-      if (!lastSyncAnchor.time || lastSyncAnchor.position < 0) {
-        lastSyncAnchor = { position: remotePos, time: now };
-        // Apply initial sync if we're way off
+      // Reset anchor on track change
+      if (lastSyncAnchor.serverTime < 0) {
+        lastSyncAnchor = { position: 0, serverTime: 0 };
+      }
+
+      // First sync for this track — set initial anchor
+      if (!lastSyncAnchor.serverTime || lastSyncAnchor.serverTime < 0) {
+        lastSyncAnchor = { position: remotePos, serverTime: serverTime };
         if (Math.abs(player.currentTime - remotePos) > 1.0) {
           player.currentTime = remotePos;
         }
         return;
       }
 
-      // Expected position = anchor + elapsed time since that anchor
-      var elapsed = (now - lastSyncAnchor.time) / 1000;
-      var expectedPos = lastSyncAnchor.position + elapsed;
+      // Compute expected position using server as universal clock:
+      // expected = server_position + (my_now - server_time - my_clock_offset)
+      var myNow = Date.now() / 1000;
+      var myOffset = (syncServerTimeOffset || 0) / 1000;  // ms → seconds
+      var expectedPos = lastSyncAnchor.position + (myNow - lastSyncAnchor.serverTime) - myOffset;
 
-      // How far are we from where we should be?
       var drift = Math.abs(player.currentTime - expectedPos);
 
-      // Only correct if drift exceeds 500ms AND we haven't recently corrected
+      // Only correct if we've genuinely drifted (>500ms)
       if (drift > 0.5) {
-        console.log('[Sync] Correcting drift:', Math.round(drift * 1000), 'ms → seeking to', Math.round(expectedPos * 1000) / 1000);
+        console.log('[Sync] Drift correction:', Math.round(drift * 1000), 'ms →', Math.round(expectedPos * 1000) / 1000);
         player.currentTime = expectedPos;
-        lastSyncAnchor = { position: expectedPos, time: now };
+        // Reset anchor after correction
+        lastSyncAnchor = { position: expectedPos, serverTime: myNow + myOffset };
       }
 
-      // Update anchor if remote position is more authoritative (they're playing)
-      if (data.playing) {
-        lastSyncAnchor = { position: remotePos, time: now };
+      // Update anchor from remote if they're playing (more recent data)
+      if (data.playing && serverTime > lastSyncAnchor.serverTime) {
+        lastSyncAnchor = { position: remotePos, serverTime: serverTime };
       }
 
       if (data.playing && player.paused) {

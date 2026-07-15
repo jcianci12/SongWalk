@@ -3990,15 +3990,21 @@
 
   // ---- Running people widget in title bar ----
   (function injectRunnersWidget() {
-    var titleBand = document.querySelector('.title-band');
-    if (!titleBand) return;
+    var titleLeft = document.querySelector('.title-band-left');
+    if (!titleLeft) return;
 
     var widget = document.createElement('div');
     widget.className = 'sync-runners-widget';
     widget.id = 'sync-runners-widget';
     widget.style.display = 'none';
     widget.innerHTML = '<div class="sync-runners-title-band" id="sync-runners-tb"></div>';
-    titleBand.appendChild(widget);
+    // Insert after the brand link, before crumbs
+    var brand = titleLeft.querySelector('.app-brand');
+    if (brand && brand.nextSibling) {
+      titleLeft.insertBefore(widget, brand.nextSibling);
+    } else {
+      titleLeft.appendChild(widget);
+    }
   })();
 
   // Repurpose "Share access" link as "Listen Together" — BEFORE overflow menu runs
@@ -4524,7 +4530,7 @@
 
       // Show/hide title bar widget
       var widget = document.getElementById('sync-runners-widget');
-      if (widget) widget.style.display = (syncConnected && peerCount > 0) ? 'flex' : 'none';
+      if (widget) widget.style.display = syncConnected ? 'flex' : 'none';
     }
 
     function updateRunners(containerId, count) {

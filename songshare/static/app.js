@@ -4041,8 +4041,9 @@
       }
     }
 
-    // Expose for the initListenTogether IIFE
+    // Expose for the initListenTogether IIFE and auto-join
     window.__songwalkToggleSync = toggleListenTogether;
+    window.__songwalkShowSyncDialog = showSyncDialog;
 
     function showSyncDialog() {
       var existing = document.getElementById('sync-modal');
@@ -4386,7 +4387,7 @@
     if (document.querySelector('.transport-band')) {
       // Auto-join from URL param (e.g. QR code scan)
       if (window.location.search.indexOf('sync=join') !== -1) {
-        showSyncDialog();
+        if (window.__songwalkShowSyncDialog) window.__songwalkShowSyncDialog();
       }
 
       if (player) {
@@ -4535,6 +4536,92 @@
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'fetch' },
           body: JSON.stringify({ album_keys: albumKeys })
         }).catch(function () {});
+      });
+    });
+  })();
+
+  // ---- Offline mode toggle ----
+  (function bindOfflineMode() {
+    if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return;
+
+    var titleActions = document.querySelector('.title-actions');
+    if (!titleActions) return;
+
+    var offlineBtn = document.createElement('button');
+    offlineBtn.type = 'button';
+    offlineBtn.className = 'frame-button';
+    offlineBtn.setAttribute('data-offline-toggle', '');
+    offlineBtn.innerHTML = '&#9723; Offline';
+    offlineBtn.title = 'Cache library for offline playback';
+    offlineBtn.style.whiteSpace = 'nowrap';
+    titleActions.appendChild(offlineBtn);
+
+    var isCaching = false;
+    var cachedCount = 0;
+
+    offlineBtn.addEventListener('click', async function () {
+      if (isCaching) return;
+      isCaching = true;
+      offlineBtn.textContent = 'Caching...';
+      offlineBtn.disabled = true;
+
+      // Collect all track URLs from the page
+      var tracks = [];
+      document.querySelectorAll('[data-track-src]').forEach(function (row) {
+        tracks.push({
+          id: row.getAttribute('data-track-id'),
+          url: row.getAttribute('data-track-src')
+        });
+      });
+
+      if (!tracks.length) {
+        offlineBtn.textContent = 'No tracks';
+        offlineBtn.disabled = false;
+        isCaching = false;
+        return;
+      }
+
+      // Listen for progress from service worker
+      var onMessage = function (event) {
+        if (event.data && event.data.action === 'cache-progress') {
+          cachedCount = event.data.cached;
+          offlineBtn.textContent = 'Caching ' + cachedCount + '/' + event.data.total;
+        }
+      };
+      navigator.serviceWorker.addEventListener('message', onMessage);
+
+      // Tell service worker to cache all tracks
+      var channel = new MessageChannel();
+      channel.port1.onmessage = function (event) {
+        navigator.serviceWorker.removeEventListener('message', onMessage);
+        isCaching = false;
+        offlineBtn.disabled = false;
+        if (event.data.done) {
+          cachedCount = event.data.cached;
+          offlineBtn.innerHTML = '\u2713 Offline (' + cachedCount + ')';
+          offlineBtn.classList.add('is-active');
+        } else {
+          offlineBtn.textContent = 'Offline failed';
+        }
+      };
+
+      navigator.serviceWorker.controller.postMessage(
+        { action: 'cache-tracks', tracks: tracks },
+        [channel.port2]
+      );
+    });
+
+    // Check existing cache on load
+    caches.open('songwalk-v2').then(function (cache) {
+      cache.keys().then(function (keys) {
+        var audioKeys = keys.filter(function (k) {
+          return k.url.indexOf('/files/') !== -1;
+        });
+        if (audioKeys.length > 0) {
+          cachedCount = audioKeys.length;
+          offlineBtn.innerHTML = '\u2713 Offline (' + cachedCount + ')';
+          offlineBtn.classList.add('is-active');
+        }
       });
     });
   })();

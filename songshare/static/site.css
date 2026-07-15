@@ -2660,3 +2660,10 @@ audio {
   border-color: #e0b4b4;
   color: #c0392b;
 }
+
+/* ---- Offline toggle ---- */
+[data-offline-toggle].is-active {
+  background: linear-gradient(180deg, #d4edda, #a8d8b0);
+  border-color: #4a9b5e;
+  color: #1f5c2f;
+}

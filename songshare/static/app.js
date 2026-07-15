@@ -3224,6 +3224,19 @@
       if (!draggedAlbum || draggedAlbum !== targetAlbum) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
+
+      // Instant DOM swap: move dragged row after target row
+      var draggedRow = findRowByTrackId(currentTrackDrag.trackIds[0]);
+      if (draggedRow && draggedRow !== row) {
+        var parent = row.parentNode;
+        var targetNext = row.nextSibling;
+        if (targetNext === draggedRow) {
+          // Dragged is already right after target — swap them
+          parent.insertBefore(draggedRow, row);
+        } else {
+          parent.insertBefore(draggedRow, targetNext);
+        }
+      }
     });
 
     row.addEventListener("drop", async (event) => {
@@ -3235,24 +3248,12 @@
       event.preventDefault();
       event.stopPropagation();
 
+      // Collect final order from DOM and persist to server
       var albumSection = row.closest('[data-album-section]');
       if (!albumSection) return;
-
-      var allRows = albumSection.querySelectorAll('[data-track-row]');
       var orderedIds = [];
-      var draggedIds = currentTrackDrag.trackIds.slice();
-      var dropTargetId = row.dataset.trackId;
-
-      allRows.forEach(function (r) {
-        var tid = r.dataset.trackId;
-        if (tid === dropTargetId) {
-          orderedIds.push(tid);
-          draggedIds.forEach(function (did) {
-            if (!orderedIds.includes(did)) orderedIds.push(did);
-          });
-        } else if (!draggedIds.includes(tid)) {
-          orderedIds.push(tid);
-        }
+      albumSection.querySelectorAll('[data-track-row]').forEach(function (r) {
+        orderedIds.push(r.dataset.trackId);
       });
 
       var libraryId = (window.location.pathname.split('/s/')[1] || '').split('?')[0];

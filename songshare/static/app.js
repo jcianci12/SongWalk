@@ -4380,25 +4380,35 @@
     function startPollFallback(libraryId) {
       if (pollTimer) return;  // already polling
       showDebugText('Polling via HTTP (WebSocket blocked)');
-      console.log('[Sync] Starting HTTP poll fallback');
-      pollTimer = setInterval(function () {
+      console.log('[Sync] Starting HTTP poll fallback (sequential)');
+
+      function poll() {
+        if (!pollTimer) return;  // stopped
         fetch('/s/' + libraryId + '/state', {
           headers: { 'Accept': 'application/json', 'X-Requested-With': 'fetch' }
         }).then(function (r) { return r.json(); }).then(function (state) {
           if (state && state.sync_state && state.sync_state.peer_id !== syncPeerId) {
-            // Apply remote state from poll
             var data = state.sync_state;
             if (data.track_id && data.position !== undefined) {
               syncWithRemoteState(data);
             }
           }
-        }).catch(function () {});
-      }, 3000);
+        }).catch(function () {
+          // Network error — just wait and retry
+        }).finally(function () {
+          // Schedule next poll only after this one completes
+          if (pollTimer) {
+            pollTimer = setTimeout(poll, 2000);
+          }
+        });
+      }
+
+      pollTimer = setTimeout(poll, 1000);  // start first poll after 1s
     }
 
     function stopPollFallback() {
       if (pollTimer) {
-        clearInterval(pollTimer);
+        clearTimeout(pollTimer);
         pollTimer = null;
         console.log('[Sync] Stopped HTTP poll fallback');
       }

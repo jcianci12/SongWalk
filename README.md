@@ -4,9 +4,16 @@
   </a>
 </p>
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="SongWalk library view" width="800">
+</p>
+
 # SongWalk
 
-SongWalk is a small self-hosted music dropbox with a shared UUID link per library.
+SongWalk is a self-hosted music dropbox. Create libraries, share them with a link, and listen together in real time. Built with Flask, vanilla JS, and a healthy dose of Windows Media Player nostalgia.
+
+[![Live](https://img.shields.io/badge/live-songwalk.tekonline.com.au-blue)](https://songwalk.tekonline.com.au)
+[![CI](https://img.shields.io/badge/CI-Drone%20CI-brightgreen)](https://ci.jobsight.tekonline.com.au)
 
 The product branding is `SongWalk`. The current module names, commands, and environment variables still use the existing `songshare` and `SONGSHARE_*` identifiers.
 
@@ -32,8 +39,9 @@ On Windows, the packaged EXE now does that directly. Run it, wait for the owner 
 - The public landing page does not enumerate existing library IDs. This is only exposed to the person opening it locally - it is not exposed over cloudflare.
 - Library management lives behind a separate private owner URL.
 
-## A nod to windows media player (legacy)
-Looks like windows media player (In my opinion the best version)
+## A nod to Windows Media Player
+
+SongWalk's UI is inspired by classic WMP — gradient title bars, chrome-line borders, Tahoma font stack. The spinning CD disc uses pure CSS (repeating conic-gradient) with a pixel-art shimmer. Drag the ☰ handle to reorder tracks. Drag album sections to reorder albums. It all feels like 2004, in the best way.
 
 ## Fast Public Exposure
 
@@ -54,13 +62,18 @@ Quick Tunnels are temporary and for demos/testing only.
 
 ## Features
 
-- Create and manage libraries from a private owner dashboard URL
+- **🎵 Listen Together** — real-time sync playback across devices. Scan a QR code, join a session, and everyone's play/pause/seek/next mirrors instantly. No host — whoever presses first wins.
+- **📱 PWA + Offline** — installs to home screen on iOS/Android. Tap □ Offline to cache all tracks via service worker. Full playback works without internet.
+- **🔗 Magic Link Auth** — enter your email, get a one-click link. No passwords. My Libraries dashboard shows all your libraries.
+- **🎨 Retro UI** — classic Windows Media Player-inspired design with pixel-art spinning CD, drag-to-reorder tracks and albums, inline editing, and star ratings.
+- Create and manage libraries from a private owner dashboard
 - Upload audio files with drag and drop
 - Import from YouTube and Spotify into any shared library
 - Fill missing title, artist, and album tags from MusicBrainz after import
 - Share the UUID-backed library URL with collaborators
 - Edit track metadata such as title, artist, and album
 - Stream tracks from the browser
+- CI/CD with Drone — push to prod, auto-deploy on Oracle ARM64
 
 ## Run Locally
 
@@ -124,6 +137,10 @@ In dev mode SongWalk uses Flask's reloader, disables static asset caching, and r
 - `SONGSHARE_PROXY_HOPS`: Number of trusted reverse proxies to honor for forwarded host/proto headers, default `0`
 - `SONGSHARE_YOUTUBE_DL_BIN`: Optional override for the YouTube downloader command. Defaults to `yt-dlp` and falls back to `youtube-dl` if present.
 - `SONGSHARE_SPOTIFY_DL_BIN`: Optional override for the Spotify downloader command. Defaults to `spotdl`.
+- `SONGWALK_SMTP_USERNAME`: SMTP username for magic link emails (PurelyMail)
+- `SONGWALK_SMTP_PASSWORD`: SMTP password for magic link emails
+- `SONGWALK_SMTP_FROM`: From address for magic link emails, defaults to `songwalk@tekonline.com.au`
+- `SONGWALK_YOUTUBE_COOKIES`: Path to a Netscape-format cookies.txt file for YouTube import auth
 
 ## Docker
 

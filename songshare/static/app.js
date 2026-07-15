@@ -4079,6 +4079,7 @@
         '</div>' +
         '<div class="sync-status-section">' +
           '<p class="sync-status-text" id="sync-status-text">Connecting\u2026</p>' +
+          '<p class="sync-debug-text" id="sync-debug-text" style="font-size:0.72rem;color:var(--text-faint);margin:4px 0 0;"></p>' +
         '</div>' +
         '<div class="sync-modal-actions">' +
           '<button type="button" class="frame-button danger sync-leave-btn">Leave Session</button>' +
@@ -4140,12 +4141,33 @@
         transports: ['websocket', 'polling']
       });
 
+      // Debug: log transport + connection events to console
+      syncSocket.io.on('reconnect_attempt', function () {
+        console.log('[Sync] Reconnect attempt, transport:', syncSocket.io.engine.transport.name);
+      });
+      syncSocket.io.on('reconnect', function () {
+        console.log('[Sync] Reconnected');
+      });
+
       syncSocket.on('connect', function () {
         syncConnected = true;
         syncPeerId = syncSocket.id;
+        var transport = syncSocket.io.engine.transport.name;
+        console.log('[Sync] Connected — transport:', transport, '— socket id:', syncPeerId);
+        showDebugText('Connected via ' + transport);
         syncSocket.emit('join_session', { library_id: libraryId });
         updateSyncStatus();
         startResyncTimer();
+      });
+
+      syncSocket.on('connect_error', function (err) {
+        console.error('[Sync] Connection error:', err.message);
+        showDebugText('Error: ' + err.message);
+      });
+
+      syncSocket.on('reconnect_error', function (err) {
+        console.error('[Sync] Reconnect error:', err.message);
+        showDebugText('Reconnect error: ' + err.message);
       });
 
       syncSocket.on('joined', function (data) {
@@ -4200,8 +4222,10 @@
         refreshLibraryAfterMutation(opts);
       });
 
-      syncSocket.on('disconnect', function () {
+      syncSocket.on('disconnect', function (reason) {
         syncConnected = false;
+        console.log('[Sync] Disconnected — reason:', reason);
+        showDebugText('Disconnected: ' + (reason || 'unknown'));
         updateSyncStatus();
       });
     }
@@ -4316,6 +4340,11 @@
       if (!el) return;
       var total = Object.keys(syncPeers).length + 1; // + self
       el.textContent = syncConnected ? 'Connected \u2014 ' + total + ' listening' : 'Not connected';
+    }
+
+    function showDebugText(msg) {
+      var el = document.getElementById('sync-debug-text');
+      if (el) el.textContent = msg;
     }
 
     function updateSyncPeers() {

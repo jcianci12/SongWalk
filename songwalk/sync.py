@@ -61,8 +61,17 @@ def init_sync(app):
             {"peer_id": sid, "peer_count": peer_count, "peers": _peers_in_room(room)},
             to=room,
         )
-        # Send a direct reply to the joiner with server time for clock sync
-        emit("joined", {"peer_id": sid, "room": room, "server_time": time.time()})
+        # Send direct reply to joiner with server time + current playback state
+        sync_info = _room_sync_state.get(room)
+        emit(
+            "joined",
+            {
+                "peer_id": sid,
+                "room": room,
+                "server_time": time.time(),
+                "sync_state": sync_info,
+            },
+        )
 
     @socketio.on("leave_session")
     def handle_leave(data):

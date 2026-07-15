@@ -4278,6 +4278,22 @@
           console.log('[Sync] Clock offset:', Math.round(syncServerTimeOffset), 'ms');
         }
         updateSyncStatus();
+
+        // If session already has playback, join it
+        if (data.sync_state && data.sync_state.track_id && data.sync_state.playing) {
+          console.log('[Sync] Joining existing playback:', data.sync_state.track_id);
+          var row = findRowByTrackId(data.sync_state.track_id);
+          if (row && player) {
+            selectRow(row, false);
+            var pos = data.sync_state.position || 0;
+            if (pos > 0) player.currentTime = pos;
+            player.play().catch(function () {});
+            lastSyncAnchor = {
+              position: pos,
+              serverTime: data.sync_state.server_time || data.server_time
+            };
+          }
+        }
       });
 
       syncSocket.on('peer_joined', function (data) {

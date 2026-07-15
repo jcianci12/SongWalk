@@ -64,7 +64,6 @@
     var syncRoom = null;
     var syncResyncTimer = null;
     var syncPeers = {};
-    var syncIgnoreUntil = 0;
 
     function toggleListenTogether() {
       if (syncEnabled) {
@@ -176,6 +175,7 @@
     }
 
     var syncServerTimeOffset = 0;  // server clock offset in ms
+    var latestVersion = 0;         // latest state version seen, ignore older
 
     function connectSocket(libraryId) {
       syncSocket = io({
@@ -222,18 +222,30 @@
         }
         updateSyncStatus();
 
-        // If session already has playback, join it
-        if (data.sync_state && data.sync_state.track_id && data.sync_state.playing) {
-          console.log('[Sync] Joining existing playback:', data.sync_state.track_id);
-          var row = findRowByTrackId(data.sync_state.track_id);
+        // If session already has state, join it
+        if (data.sync_state && data.sync_state.track_id) {
+          var state = data.sync_state;
+          console.log('[Sync] Joining session:', state.track_id, state.playing ? 'playing' : 'paused');
+          var row = findRowByTrackId(state.track_id);
           if (row && player) {
             selectRow(row, false);
-            var pos = data.sync_state.position || 0;
+            // Calculate elapsed time since state was recorded
+            var serverNow = data.server_time || (Date.now() / 1000);
+            var stateAge = serverNow - (state.server_time || serverNow);
+            var pos = (state.position || 0);
+            if (state.playing) {
+              // Advance position by elapsed time
+              pos += Math.max(0, stateAge);
+            }
             if (pos > 0) player.currentTime = pos;
-            player.play().catch(function () {});
+            if (state.playing) {
+              player.play().catch(function () {});
+            }
             lastSyncAnchor = {
+              trackId: state.track_id,
               position: pos,
-              serverTime: data.sync_state.server_time || data.server_time
+              serverTime: serverNow,
+              playing: state.playing
             };
           }
         }
@@ -260,16 +272,21 @@
 
       syncSocket.on('sync_action', function (data) {
         if (data.peer_id === syncPeerId) return;
-        if (Date.now() < syncIgnoreUntil) return;
+
+        // Ignore stale/duplicate states using server version
+        if (data.version && data.version <= latestVersion) {
+          console.log('[Sync] Ignoring stale action v' + data.version + ' (have v' + latestVersion + ')');
+          return;
+        }
+        latestVersion = data.version || latestVersion;
 
         // Scheduled execution: queue action for the server's execute_at time
         if (data.execute_at) {
           var serverExecuteMs = data.execute_at * 1000;
           var localTimeMs = Date.now();
-          // Adjust server time to local clock using our offset
           var localExecuteMs = serverExecuteMs - (syncServerTimeOffset || 0);
           var delay = Math.max(0, localExecuteMs - localTimeMs);
-          console.log('[Sync] Scheduling', data.action, 'in', Math.round(delay), 'ms');
+          console.log('[Sync] Scheduling', data.action, 'v' + data.version, 'in', Math.round(delay), 'ms');
           setTimeout(function () {
             applyRemoteAction(data);
           }, delay);
@@ -280,6 +297,8 @@
 
       syncSocket.on('sync_state', function (data) {
         if (data.peer_id === syncPeerId) return;
+        // Only use for drift check if version is newer
+        if (data.version && data.version <= latestVersion) return;
         syncWithRemoteState(data);
       });
 
@@ -336,7 +355,7 @@
       isRemoteAction = false;
     }
 
-    var lastSyncAnchor = { position: 0, serverTime: 0 };  // server-anchored reference
+    var lastSyncAnchor = { trackId: '', position: 0, serverTime: 0, playing: false };
 
     function syncWithRemoteState(data) {
       if (!player || !player.src) return;
@@ -344,48 +363,53 @@
       var currentTrack = trackStateFromRow(currentPlaybackRow());
       if (!currentTrack || currentTrack.id !== data.track_id) return;
 
+      // Reset anchor if track changed
+      if (lastSyncAnchor.trackId !== data.track_id) {
+        lastSyncAnchor = { trackId: data.track_id, position: 0, serverTime: 0, playing: false };
+      }
+
       var remotePos = data.position || 0;
-      var serverTime = data.server_time || 0;
+      var serverTime = data.server_time || (Date.now() / 1000);
 
-      // Reset anchor on track change
-      if (lastSyncAnchor.serverTime < 0) {
-        lastSyncAnchor = { position: 0, serverTime: 0 };
+      // Always update anchor from newest authoritative state
+      if (!lastSyncAnchor.serverTime || serverTime >= lastSyncAnchor.serverTime) {
+        lastSyncAnchor = {
+          trackId: data.track_id,
+          position: remotePos,
+          serverTime: serverTime,
+          playing: data.playing
+        };
       }
 
-      // First sync for this track — set initial anchor
-      if (!lastSyncAnchor.serverTime || lastSyncAnchor.serverTime < 0) {
-        lastSyncAnchor = { position: remotePos, serverTime: serverTime };
-        if (Math.abs(player.currentTime - remotePos) > 1.0) {
-          player.currentTime = remotePos;
-        }
-        return;
-      }
-
-      // Compute expected position using server as universal clock:
-      // expected = server_position + (my_now - server_time - my_clock_offset)
+      // Calculate expected position from anchor: paused = fixed, playing = advancing
       var myNow = Date.now() / 1000;
-      var myOffset = (syncServerTimeOffset || 0) / 1000;  // ms → seconds
-      var expectedPos = lastSyncAnchor.position + (myNow - lastSyncAnchor.serverTime) - myOffset;
+      var myOffset = (syncServerTimeOffset || 0) / 1000;
+      var elapsed = myNow - lastSyncAnchor.serverTime - myOffset;
+      var expectedPos = lastSyncAnchor.playing
+        ? lastSyncAnchor.position + elapsed
+        : lastSyncAnchor.position;
 
       var drift = Math.abs(player.currentTime - expectedPos);
 
-      // Only correct if we've genuinely drifted (>500ms)
-      if (drift > 0.5) {
+      // Only correct if drifted >500ms and anchor is recent (<10s)
+      if (drift > 0.5 && (myNow - lastSyncAnchor.serverTime) < 10) {
         console.log('[Sync] Drift correction:', Math.round(drift * 1000), 'ms →', Math.round(expectedPos * 1000) / 1000);
         player.currentTime = expectedPos;
-        // Reset anchor after correction
-        lastSyncAnchor = { position: expectedPos, serverTime: myNow + myOffset };
+        lastSyncAnchor = {
+          trackId: data.track_id,
+          position: expectedPos,
+          serverTime: myNow + myOffset,
+          playing: lastSyncAnchor.playing
+        };
       }
 
-      // Update anchor from remote if they're playing (more recent data)
-      if (data.playing && serverTime > lastSyncAnchor.serverTime) {
-        lastSyncAnchor = { position: remotePos, serverTime: serverTime };
-      }
-
-      if (data.playing && player.paused) {
-        player.play().catch(function () {});
-      } else if (!data.playing && !player.paused) {
-        player.pause();
+      // Sync play/pause state only if anchor is recent
+      if ((myNow - lastSyncAnchor.serverTime) < 5) {
+        if (data.playing && player.paused && player.src) {
+          player.play().catch(function () {});
+        } else if (!data.playing && !player.paused) {
+          player.pause();
+        }
       }
     }
 
@@ -404,7 +428,6 @@
       }, extra || {});
 
       syncSocket.emit('sync_action', data);
-      syncIgnoreUntil = Date.now() + 500;
     }
 
     function startResyncTimer() {

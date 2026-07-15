@@ -14,11 +14,10 @@ _room_peers: dict[str, set[str]] = defaultdict(set)
 # Store last sync state per room for HTTP polling fallback
 _room_sync_state: dict[str, dict] = {}
 
-# Anchor client per room — first client to join is the timing authority
-_room_anchor: dict[str, str] = {}  # room -> anchor_sid
-_room_anchor_offset: dict[
-    str, float
-] = {}  # room -> anchor's clock offset from server (seconds)
+# Monotonically increasing version per room — clients ignore stale states
+_room_version: dict[str, int] = defaultdict(int)
+
+# Remove unused anchor tracking — server is the single authority
 
 
 def _room_for(library_id: str) -> str:
@@ -93,6 +92,7 @@ def init_sync(app):
 
     @socketio.on("sync_action")
     def handle_sync_action(data):
+        """Intentional user action — increments version, becomes authoritative state."""
         library_id = data.get("library_id", "").strip()
         action = data.get("action", "").strip()
         if not library_id or not action:
@@ -100,34 +100,40 @@ def init_sync(app):
         room = _room_for(library_id)
         sid = request.sid
 
-        # Build authoritative state from the action
+        # Validate position is a finite number
+        pos = data.get("position", 0)
+        if not isinstance(pos, (int, float)) or not (-1 < pos < 86400):
+            pos = 0
+
+        # Increment room version
+        _room_version[room] += 1
+
         state = {
             "action": action,
-            "track_id": data.get("track_id", ""),
-            "position": data.get("position", 0),
-            "playing": data.get("playing", action != "pause"),
+            "track_id": str(data.get("track_id", "")),
+            "position": pos,
+            "playing": bool(data.get("playing", action != "pause")),
             "peer_id": sid,
             "server_time": time.time(),
+            "version": _room_version[room],
         }
 
-        # Update master state for this room
         _room_sync_state[room] = state
-
-        # Broadcast to all EXCEPT sender — they get the authoritative state
         state["execute_at"] = state["server_time"] + 0.15
         emit("sync_action", state, to=room, include_self=False)
 
     @socketio.on("sync_state")
     def handle_sync_state(data):
+        """Passive health report — does NOT overwrite authoritative state. Relayed for latency info only."""
         library_id = data.get("library_id", "").strip()
         if not library_id:
             return
         room = _room_for(library_id)
         data["peer_id"] = request.sid
-        # Server is the universal clock source — stamp with server time
         data["server_time"] = time.time()
-        # Store for HTTP polling fallback
-        _room_sync_state[room] = data
+        # Include current room version so clients know if they're stale
+        data["version"] = _room_version.get(room, 0)
+        # Do NOT overwrite _room_sync_state — this is not authoritative
         emit("sync_state", data, to=room, include_self=False)
 
     @socketio.on("disconnect")

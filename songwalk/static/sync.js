@@ -561,7 +561,7 @@
 
         if (progressInput) {
           progressInput.addEventListener('change', function () {
-            if (syncEnabled) broadcastAction('seek', { position: player.currentTime });
+            if (syncEnabled) broadcastAction('seek', { position: player.currentTime, playing: !player.paused });
           });
         }
 

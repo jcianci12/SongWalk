@@ -105,7 +105,7 @@ def init_sync(app):
             "action": action,
             "track_id": data.get("track_id", ""),
             "position": data.get("position", 0),
-            "playing": action != "pause",
+            "playing": data.get("playing", action != "pause"),
             "peer_id": sid,
             "server_time": time.time(),
         }

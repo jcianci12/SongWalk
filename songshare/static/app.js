@@ -4136,6 +4136,8 @@
       document.head.appendChild(script);
     }
 
+    var syncServerTimeOffset = 0;  // server clock offset in ms
+
     function connectSocket(libraryId) {
       syncSocket = io({
         transports: ['websocket', 'polling']
@@ -4172,6 +4174,11 @@
 
       syncSocket.on('joined', function (data) {
         syncPeerId = data.peer_id;
+        // Compute clock offset: server time minus our local time
+        if (data.server_time) {
+          syncServerTimeOffset = (data.server_time * 1000) - Date.now();
+          console.log('[Sync] Clock offset:', Math.round(syncServerTimeOffset), 'ms');
+        }
         updateSyncStatus();
       });
 
@@ -4197,7 +4204,21 @@
       syncSocket.on('sync_action', function (data) {
         if (data.peer_id === syncPeerId) return;
         if (Date.now() < syncIgnoreUntil) return;
-        applyRemoteAction(data);
+
+        // Scheduled execution: queue action for the server's execute_at time
+        if (data.execute_at) {
+          var serverExecuteMs = data.execute_at * 1000;
+          var localTimeMs = Date.now();
+          // Adjust server time to local clock using our offset
+          var localExecuteMs = serverExecuteMs - (syncServerTimeOffset || 0);
+          var delay = Math.max(0, localExecuteMs - localTimeMs);
+          console.log('[Sync] Scheduling', data.action, 'in', Math.round(delay), 'ms');
+          setTimeout(function () {
+            applyRemoteAction(data);
+          }, delay);
+        } else {
+          applyRemoteAction(data);
+        }
       });
 
       syncSocket.on('sync_state', function (data) {

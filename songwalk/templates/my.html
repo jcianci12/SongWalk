@@ -10,8 +10,8 @@
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>My Libraries — SongWalk</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" data-dynamic-favicon>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
-    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=3">
+    <script defer src="{{ url_for('static', filename='app.js') }}?v=3"></script>
   </head>
   <body class="wmp-page">
     <div class="wmp-window home-window">
@@ -81,7 +81,21 @@
 
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}");
+        var swUrl = "{{ url_for('static', filename='sw.js') }}?v=3";
+        navigator.serviceWorker.register(swUrl).then(function(reg) {
+          setInterval(function() { reg.update(); }, 3600000);
+          reg.addEventListener('updatefound', function() {
+            var newWorker = reg.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', function() {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  newWorker.postMessage({ action: 'skipWaiting' });
+                  setTimeout(function() { window.location.reload(); }, 500);
+                }
+              });
+            }
+          });
+        });
       }
     </script>
   </body>

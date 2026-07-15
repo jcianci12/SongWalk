@@ -9,8 +9,8 @@
     <meta name="theme-color" content="#2c82d3">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>SongWalk Library</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}">
-    <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=3">
+    <script defer src="{{ url_for('static', filename='app.js') }}?v=3"></script>
   </head>
   <body class="wmp-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
     <div class="wmp-window home-window">
@@ -115,7 +115,21 @@
     </div>
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register("{{ url_for('static', filename='sw.js') }}");
+        var swUrl = "{{ url_for('static', filename='sw.js') }}?v=3";
+        navigator.serviceWorker.register(swUrl).then(function(reg) {
+          setInterval(function() { reg.update(); }, 3600000);
+          reg.addEventListener('updatefound', function() {
+            var newWorker = reg.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', function() {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  newWorker.postMessage({ action: 'skipWaiting' });
+                  setTimeout(function() { window.location.reload(); }, 500);
+                }
+              });
+            }
+          });
+        });
       }
     </script>
   </body>

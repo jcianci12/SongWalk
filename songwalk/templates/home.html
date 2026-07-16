@@ -32,7 +32,7 @@
     <meta name="twitter:image" content="{{ base_url }}{{ url_for('static', filename='icons/icon.svg') }}">
 
     <title>SongWalk — Self-Hosted Music Dropbox | Share &amp; Listen Together</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=5">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=6">
     <script defer src="{{ url_for('static', filename='app.js') }}?v=3"></script>
     <script defer src="{{ url_for('static', filename='sync.js') }}?v=3"></script>
   </head>
@@ -115,21 +115,63 @@
               {% include '_quick_tunnel_panel.html' %}
             </section>
           {% else %}
-            <section class="share-entry-card">
-              <p class="share-entry-lead">Enter your email to create or access your music library. We'll send you a magic link — no password needed.</p>
-              <form method="post" action="{{ url_for('send_magic_link_route') }}" class="share-jump" data-magic-link-form>
-                <input type="email" name="email" placeholder="you@example.com" required>
-                <button type="submit" class="frame-button primary">Send me a link</button>
-              </form>
-              <p class="share-entry-note">We'll email you a one-click link. No account, no password.</p>
-            </section>
-            <section class="share-entry-card">
-              <p class="share-entry-lead">Ask the sender for a full share URL, then paste it above to open that library directly.</p>
-              <div class="share-example-shell">
-                <p class="dock-label">Example format</p>
-                <code>{{ base_url }}/s/12345678-1234-1234-1234-123456789abc</code>
-              </div>
-              <p class="share-entry-note">Anyone who knows a library URL can open that library, but this landing page does not enumerate shares.</p>
+            <section class="flow-cards">
+              <section class="share-entry-card flow-card flow-card--create">
+                <div class="flow-header">
+                  <span class="flow-icon">🎧</span>
+                  <div>
+                    <h2 class="flow-title">Create your library</h2>
+                    <p class="flow-sub">No account, no password — just your email.</p>
+                  </div>
+                </div>
+                <ol class="flow-steps">
+                  <li class="flow-step">
+                    <span class="flow-step-num">1</span>
+                    <span class="flow-step-text">Enter your email below</span>
+                  </li>
+                  <li class="flow-step">
+                    <span class="flow-step-num">2</span>
+                    <span class="flow-step-text">Click the magic link we email you</span>
+                  </li>
+                  <li class="flow-step">
+                    <span class="flow-step-num">3</span>
+                    <span class="flow-step-text">Create a library, upload tracks, share the link</span>
+                  </li>
+                </ol>
+                <form method="post" action="{{ url_for('send_magic_link_route') }}" class="share-jump flow-form" data-magic-link-form>
+                  <input type="email" name="email" placeholder="you@example.com" required>
+                  <button type="submit" class="frame-button primary">Send me a link</button>
+                </form>
+              </section>
+
+              <section class="share-entry-card flow-card flow-card--join">
+                <div class="flow-header">
+                  <span class="flow-icon">🔗</span>
+                  <div>
+                    <h2 class="flow-title">Open a shared library</h2>
+                    <p class="flow-sub">Got a share link from someone? Open it here.</p>
+                  </div>
+                </div>
+                <ol class="flow-steps">
+                  <li class="flow-step">
+                    <span class="flow-step-num">1</span>
+                    <span class="flow-step-text">Get the share URL from the library owner</span>
+                  </li>
+                  <li class="flow-step">
+                    <span class="flow-step-num">2</span>
+                    <span class="flow-step-text">Paste it into the top bar and hit Open</span>
+                  </li>
+                  <li class="flow-step">
+                    <span class="flow-step-num">3</span>
+                    <span class="flow-step-text">Listen, upload, and edit — instantly</span>
+                  </li>
+                </ol>
+                <div class="share-example-shell">
+                  <p class="dock-label">Example share URL</p>
+                  <code>{{ base_url }}/s/12345678-1234-1234-1234-123456789abc</code>
+                </div>
+                <p class="share-entry-note">Library IDs are never listed on this page. Only people with the link can access.</p>
+              </section>
             </section>
           {% endif %}
 

@@ -59,6 +59,23 @@
   var applyingRemote = false;
   var pendingTimer = null;
 
+  // ---- Diagnostic log (detect echo loops) ----
+  window.__songwalk_diag = [];
+  function diagLog(event, data) {
+    var entry = {
+      ts: Date.now(),
+      event: event,
+      playerTime: player ? player.currentTime : null,
+      paused: player ? player.paused : null,
+      src: player ? (player.getAttribute('src') || '').split('/').pop() : null,
+      applyingRemote: applyingRemote,
+      data: data || {}
+    };
+    window.__songwalk_diag.push(entry);
+    // Keep last 200 entries max
+    if (window.__songwalk_diag.length > 200) window.__songwalk_diag.shift();
+  }
+
   // ---- User-initiated actions ----
   function userPlay() {
     if (!player) return;
@@ -190,6 +207,7 @@
   function applyRemoteAction(data) {
     if (!player) return;
     applyingRemote = true;
+    diagLog('remote_apply', data);
 
     if (data.track_id) {
       var currentTrack = trackStateFromRow ? trackStateFromRow(currentPlaybackRow && currentPlaybackRow()) : null;
@@ -221,14 +239,24 @@
     if (!player) return;
     var row = findRowByTrackId ? findRowByTrackId(state.track_id) : null;
     if (!row || !selectRow) return;
+    applyingRemote = true;
     selectRow(row, false);
-
     var pos = state.position || 0;
     if (state.playing && state.server_time && serverTime) {
       pos += Math.max(0, serverTime - state.server_time);
     }
     if (pos > 0) player.currentTime = pos;
-    if (state.playing) player.play().catch(function () {});
+    if (state.playing) {
+      player.play().then(function () {
+        applyingRemote = false;
+      }).catch(function () {
+        applyingRemote = false;
+      });
+    } else {
+      applyingRemote = false;
+    }
+    // Diagnostic: log join-state application
+    diagLog('join_apply', { track_id: state.track_id, position: pos, playing: state.playing });
   }
 
   function isValidAction(data) {
@@ -308,14 +336,27 @@
   // Listen to player events for sync broadcasting (instead of fighting app.js click handler)
   if (player) {
     player.addEventListener('play', function () {
-      if (enabled && !applyingRemote) broadcastAction('play');
+      if (enabled && !applyingRemote) {
+        diagLog('broadcast_play', {});
+        broadcastAction('play');
+      } else {
+        diagLog('play_ignored', { enabled: enabled, applyingRemote: applyingRemote });
+      }
     });
     player.addEventListener('pause', function () {
-      if (enabled && !applyingRemote) broadcastAction('pause');
+      if (enabled && !applyingRemote) {
+        diagLog('broadcast_pause', {});
+        broadcastAction('pause');
+      } else {
+        diagLog('pause_ignored', { enabled: enabled, applyingRemote: applyingRemote });
+      }
     });
     player.addEventListener('seeked', function () {
       if (enabled && !applyingRemote) {
+        diagLog('broadcast_seek', { position: player.currentTime });
         broadcastAction('seek', { position: player.currentTime, playing: !player.paused });
+      } else {
+        diagLog('seeked_ignored', { enabled: enabled, applyingRemote: applyingRemote });
       }
     });
   }

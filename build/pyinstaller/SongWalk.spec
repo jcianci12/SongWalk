@@ -30,7 +30,9 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=[],
     datas=datas,
-    hiddenimports=collect_submodules("pystray"),
+    hiddenimports=collect_submodules("pystray") + [
+        "engineio.async_drivers.threading",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

@@ -6,7 +6,7 @@ from collections import defaultdict
 from flask import request
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 
-socketio = SocketIO()
+socketio = SocketIO(async_mode="threading")
 
 # Track peers per sync room: { "sync:<library_id>": {sid, sid, ...} }
 _room_peers: dict[str, set[str]] = defaultdict(set)

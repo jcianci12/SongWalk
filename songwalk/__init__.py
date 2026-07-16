@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import eventlet
-
-eventlet.monkey_patch()
-
 import os
 import secrets
 import threading

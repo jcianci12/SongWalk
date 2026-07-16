@@ -204,12 +204,17 @@
     }
 
     if (data.playing && player.paused && player.src) {
-      player.play().catch(function () {});
+      player.play().then(function () {
+        applyingRemote = false;
+      }).catch(function () {
+        applyingRemote = false;
+      });
     } else if (!data.playing && !player.paused) {
       player.pause();
+      applyingRemote = false;
+    } else {
+      applyingRemote = false;
     }
-
-    applyingRemote = false;
   }
 
   function applyJoinState(state, serverTime) {

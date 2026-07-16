@@ -3827,8 +3827,15 @@
         selectRow(selectedRow, false);
       }
 
+      // Ensure media is loaded before play (preload="none" workaround)
+      if (player.src && player.paused) {
+        player.load();
+      }
+
       if (player.paused) {
-        await player.play().catch(() => {});
+        await player.play().catch((err) => {
+          console.error('play() rejected:', err.name, err.message);
+        });
       } else {
         player.pause();
       }

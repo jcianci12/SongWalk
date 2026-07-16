@@ -176,7 +176,7 @@ def broadcast_library_change(
         data["payload"] = payload
     try:
         socketio.emit("library_changed", data, to=room)
-    except RuntimeError:
-        # socketio.emit raises RuntimeError if called outside of a SocketIO
-        # request context and the server is not running (e.g. during tests).
+    except (RuntimeError, AttributeError):
+        # RuntimeError: called outside SocketIO request context (server not running).
+        # AttributeError: socketio.server is None (app not initialised, e.g. during tests).
         pass

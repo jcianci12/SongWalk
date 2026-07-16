@@ -300,10 +300,18 @@
     toggleListenTogether();
   }
 
-  var playBtn = document.querySelector('[data-transport-play]');
-  if (playBtn) {
-    playBtn.addEventListener('click', function () {
-      if (player && player.paused) { userPlay(); } else { userPause(); }
+  // Listen to player events for sync broadcasting (instead of fighting app.js click handler)
+  if (player) {
+    player.addEventListener('play', function () {
+      if (enabled && !applyingRemote) broadcastAction('play');
+    });
+    player.addEventListener('pause', function () {
+      if (enabled && !applyingRemote) broadcastAction('pause');
+    });
+    player.addEventListener('seeked', function () {
+      if (enabled && !applyingRemote) {
+        broadcastAction('seek', { position: player.currentTime, playing: !player.paused });
+      }
     });
   }
   if (nextButton) nextButton.addEventListener('click', userNext);

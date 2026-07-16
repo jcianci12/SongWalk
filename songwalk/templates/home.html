@@ -32,7 +32,7 @@
     <meta name="twitter:image" content="{{ base_url }}{{ url_for('static', filename='icons/icon.svg') }}">
 
     <title>SongWalk — Self-Hosted Music Dropbox | Share &amp; Listen Together</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=6">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=7">
     <script defer src="{{ url_for('static', filename='app.js') }}?v=3"></script>
     <script defer src="{{ url_for('static', filename='sync.js') }}?v=3"></script>
   </head>
@@ -173,6 +173,20 @@
                 <p class="share-entry-note">Library IDs are never listed on this page. Only people with the link can access.</p>
               </section>
             </section>
+
+            <div class="download-banner">
+              <div class="download-banner-content">
+                <span class="download-emoji">🖥️</span>
+                <div>
+                  <h3 class="download-title">Run it on your own machine</h3>
+                  <p class="download-sub">Download the Windows desktop app — no Docker, no Python, no setup. Double-click and go.</p>
+                </div>
+              </div>
+              <a href="https://github.com/jcianci12/SongWalk/releases/latest" target="_blank" rel="noopener noreferrer" class="frame-button primary download-btn">
+                <svg class="download-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L4.78 5.97a.75.75 0 0 0-1.06 1.06l3.75 3.75ZM3.75 13a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z"/></svg>
+                Download for Windows
+              </a>
+            </div>
           {% endif %}
 
           {% if not local_access_mode %}

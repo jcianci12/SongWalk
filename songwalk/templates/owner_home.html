@@ -9,9 +9,9 @@
     <meta name="theme-color" content="#2c82d3">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>SongWalk Owner</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=6">
-    <script defer src="{{ url_for('static', filename='app.js') }}?v=6"></script>
-    <script defer src="{{ url_for('static', filename='sync.js') }}?v=6"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=7">
+    <script defer src="{{ url_for('static', filename='app.js') }}?v=7"></script>
+    <script defer src="{{ url_for('static', filename='sync.js') }}?v=7"></script>
   </head>
   <body class="wmp-page" data-dev-mode="{{ '1' if dev_mode else '0' }}">
     <div class="wmp-window home-window">
@@ -123,7 +123,7 @@
     </div>
     <script>
       if ('serviceWorker' in navigator) {
-        var swUrl = "{{ url_for('static', filename='sw.js') }}?v=6";
+        var swUrl = "{{ url_for('static', filename='sw.js') }}?v=7";
         navigator.serviceWorker.register(swUrl).then(function(reg) {
           setInterval(function() { reg.update(); }, 3600000);
           reg.addEventListener('updatefound', function() {

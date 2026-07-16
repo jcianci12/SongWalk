@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 ROOT = Path(SPECPATH).resolve().parents[1]
-PACKAGE_DIR = ROOT / "songshare"
+PACKAGE_DIR = ROOT / "songwalk"
 
 
 def collect_package_data(package_dir: Path, relative_dirs: list[str]) -> list[tuple[str, str]]:
@@ -16,7 +16,7 @@ def collect_package_data(package_dir: Path, relative_dirs: list[str]) -> list[tu
             continue
         for path in source_root.rglob("*"):
             if path.is_file():
-                target_dir = f"songshare/{relative_dir}/{path.relative_to(source_root).parent.as_posix()}"
+                target_dir = f"songwalk/{relative_dir}/{path.relative_to(source_root).parent.as_posix()}"
                 if target_dir.endswith("/."):
                     target_dir = target_dir[:-2]
                 datas.append((str(path), target_dir))

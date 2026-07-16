@@ -1,4 +1,4 @@
-from songshare.desktop import main
+from songwalk.desktop import main
 
 
 if __name__ == "__main__":

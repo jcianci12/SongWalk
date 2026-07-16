@@ -10,9 +10,9 @@
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <title>Import | {{ library.display_name }}</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" data-dynamic-favicon>
-    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=6">
-    <script defer src="{{ url_for('static', filename='app.js') }}?v=6"></script>
-    <script defer src="{{ url_for('static', filename='sync.js') }}?v=6"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='site.css') }}?v=7">
+    <script defer src="{{ url_for('static', filename='app.js') }}?v=7"></script>
+    <script defer src="{{ url_for('static', filename='sync.js') }}?v=7"></script>
   </head>
   <body
     class="wmp-page import-page"
@@ -257,7 +257,7 @@
     </div>
     <script>
       if ('serviceWorker' in navigator) {
-        var swUrl = "{{ url_for('static', filename='sw.js') }}?v=6";
+        var swUrl = "{{ url_for('static', filename='sw.js') }}?v=7";
         navigator.serviceWorker.register(swUrl).then(function(reg) {
           setInterval(function() { reg.update(); }, 3600000);
           reg.addEventListener('updatefound', function() {

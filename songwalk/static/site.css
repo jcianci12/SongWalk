@@ -2962,3 +2962,67 @@ audio {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Download banner (public splash) ---- */
+.download-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  margin: 8px 18px 0;
+  background: linear-gradient(135deg, #e8f0fa, #d4e4f5);
+  border: 1px solid var(--chrome-line-strong);
+  border-radius: 8px;
+}
+
+.download-banner-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.download-emoji {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.download-title {
+  margin: 0 0 2px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.download-sub {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--text-soft);
+  line-height: 1.4;
+}
+
+.download-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.download-icon {
+  flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+  .download-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .download-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

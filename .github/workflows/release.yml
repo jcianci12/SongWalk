@@ -1,0 +1,74 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r build\pyinstaller\requirements.txt
+
+      - name: Build EXE with PyInstaller
+        run: |
+          python -m PyInstaller `
+            --noconfirm --clean `
+            --distpath build\pyinstaller\dist\windows `
+            --workpath build\pyinstaller\build\windows `
+            build\pyinstaller\SongWalk.spec
+
+      - name: Bundle cloudflared
+        run: |
+          $url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+          Invoke-WebRequest -Uri $url -OutFile "build\pyinstaller\dist\windows\SongWalk\cloudflared.exe"
+
+      - name: Read version
+        id: version
+        run: |
+          $ver = Get-Content VERSION | ForEach-Object { $_.Trim() }
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create ZIP archive
+        run: |
+          Compress-Archive `
+            -Path build\pyinstaller\dist\windows\SongWalk\* `
+            -DestinationPath SongWalk-v${{ steps.version.outputs.version }}-windows.zip
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SongWalk v${{ steps.version.outputs.version }}
+          body: |
+            ## SongWalk v${{ steps.version.outputs.version }}
+
+            **Self-hosted music dropbox** — create libraries, share with a link, listen together in real time.
+
+            ### Windows Desktop App
+            1. Download `SongWalk-v${{ steps.version.outputs.version }}-windows.zip`
+            2. Extract anywhere
+            3. Run `SongWalk.exe`
+            4. Browser opens to your owner dashboard
+            5. Create a library, copy the share URL, send it
+
+            Quick Tunnel starts automatically. No setup, no Docker, no Python.
+
+            **[Live demo →](https://songwalk.tekonline.com.au)**
+          files: SongWalk-v${{ steps.version.outputs.version }}-windows.zip
+          generate_release_notes: true

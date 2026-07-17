@@ -439,6 +439,8 @@ class LibraryImportService:
         cookies_arg = self._build_cookies_arg()
         return prefix + [
             "--ignore-config",
+            "--extractor-args",
+            "youtube:player_client=android,ios,mweb",
             "--extract-audio",
             "--audio-format",
             "mp3",
@@ -459,6 +461,8 @@ class LibraryImportService:
         cookies_arg = self._build_cookies_arg()
         return prefix + [
             "--ignore-config",
+            "--extractor-args",
+            "youtube:player_client=android,ios,mweb",
             "--flat-playlist",
             "--dump-json",
             "--no-warnings",

@@ -1364,6 +1364,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     def delete_tracks(library_id: str):
         payload = request.get_json(silent=True) or {}
         track_ids = payload.get("track_ids", [])
+        # Fallback: read from form data (frontend sends FormData)
+        if not track_ids:
+            track_ids = request.form.getlist("track_ids")
         if not isinstance(track_ids, list):
             return jsonify({"ok": False, "error": "track_ids must be a list."}), 400
 
@@ -1447,6 +1450,36 @@ def create_app(test_config: dict | None = None) -> Flask:
                 "view_library", library_id=library_id, notice="Album order updated."
             )
         )
+
+    @app.post("/s/<library_id>/albums/delete")
+    def delete_album(library_id: str):
+        payload = request.get_json(silent=True) or {}
+        album_key = str(payload.get("album_key", "")).strip()
+        if not album_key:
+            return jsonify({"ok": False, "error": "album_key is required."}), 400
+
+        parts = album_key.split("::", 1)
+        if len(parts) != 2:
+            return jsonify(
+                {"ok": False, "error": "album_key must be 'album::artist'."}
+            ), 400
+
+        album_name, artist_name = parts
+        try:
+            deleted = store.delete_album(
+                library_id, album_name=album_name, artist_name=artist_name
+            )
+        except (LibraryNotFoundError, TrackNotFoundError):
+            abort(404)
+
+        if deleted:
+            broadcast_library_change(library_id, "track_deleted", {"count": deleted})
+
+        if wants_json():
+            return jsonify({"ok": True, "deleted": deleted})
+
+        notice = f"Removed album '{album_name}' ({deleted} track{'s' if deleted != 1 else ''})."
+        return redirect(url_for("view_library", library_id=library_id, notice=notice))
 
     @app.get("/s/<library_id>/tracks/<track_id>/file")
     def stream_track(library_id: str, track_id: str):

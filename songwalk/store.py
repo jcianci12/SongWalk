@@ -596,6 +596,23 @@ class Store:
 
             return len(tracks_to_remove)
 
+    def delete_album(
+        self, library_id: str, *, album_name: str, artist_name: str
+    ) -> int:
+        """Delete all tracks belonging to a specific album + artist pair."""
+        library = self.get_library(library_id)
+        album_lower = album_name.strip().lower()
+        artist_lower = artist_name.strip().lower()
+        track_ids = [
+            t.id
+            for t in library.tracks
+            if (t.album or "").strip().lower() == album_lower
+            and (t.artist or "").strip().lower() == artist_lower
+        ]
+        if not track_ids:
+            return 0
+        return self.delete_tracks(library_id, track_ids)
+
     def get_track_file(self, library_id: str, track_id: str) -> tuple[Track, Path]:
         library = self.get_library(library_id)
         track = self._find_track(library, track_id)

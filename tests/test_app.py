@@ -37,7 +37,9 @@ def new_test_dir() -> Path:
 
 
 class FakeLookupClient:
-    def search_release_candidates(self, *, title: str, artist: str, album: str, limit: int = 5):
+    def search_release_candidates(
+        self, *, title: str, artist: str, album: str, limit: int = 5
+    ):
         return [
             LookupCandidate(
                 release_id="release-123",
@@ -61,12 +63,27 @@ class FakeImportService:
         self.calls: list[tuple[str, str]] = []
 
     def import_uploaded_files(self, library_id: str, uploads):
-        raise AssertionError("File uploads should use the real import service in this test.")
+        raise AssertionError(
+            "File uploads should use the real import service in this test."
+        )
 
-    def import_youtube_url(self, library_id: str, source_url: str, *, progress_callback=None):
+    def import_youtube_url(
+        self, library_id: str, source_url: str, *, progress_callback=None
+    ):
         self.calls.append(("youtube", source_url))
         if progress_callback:
-            progress_callback(type("Progress", (), {"phase": "downloading", "message": "Downloading YouTube audio...", "percent": 42, "current_item": "Demo video"})())
+            progress_callback(
+                type(
+                    "Progress",
+                    (),
+                    {
+                        "phase": "downloading",
+                        "message": "Downloading YouTube audio...",
+                        "percent": 42,
+                        "current_item": "Demo video",
+                    },
+                )()
+            )
         time.sleep(0.15)
         track = self.store.add_track(
             library_id,
@@ -74,10 +91,23 @@ class FakeImportService:
         )
         return ImportOutcome(uploaded=1, tracks=[track])
 
-    def import_spotify_url(self, library_id: str, source_url: str, *, progress_callback=None):
+    def import_spotify_url(
+        self, library_id: str, source_url: str, *, progress_callback=None
+    ):
         self.calls.append(("spotify", source_url))
         if progress_callback:
-            progress_callback(type("Progress", (), {"phase": "downloading", "message": "Resolving Spotify track...", "percent": None, "current_item": "Demo track"})())
+            progress_callback(
+                type(
+                    "Progress",
+                    (),
+                    {
+                        "phase": "downloading",
+                        "message": "Resolving Spotify track...",
+                        "percent": None,
+                        "current_item": "Demo track",
+                    },
+                )()
+            )
         time.sleep(0.15)
         track = self.store.add_track(
             library_id,
@@ -130,7 +160,9 @@ class FakeQuickTunnelManager:
     def start(self, *, wait_seconds: float = 20.0):
         self.start_calls += 1
         self._status.running = True
-        self._status.public_url = f"https://started-{self.start_calls}.trycloudflare.com"
+        self._status.public_url = (
+            f"https://started-{self.start_calls}.trycloudflare.com"
+        )
         self._status.message = "Cloudflare Quick Tunnel ready."
         return self.status()
 
@@ -143,7 +175,9 @@ class FakeQuickTunnelManager:
 
     def rotate(self, *, wait_seconds: float = 20.0):
         self.rotate_calls += 1
-        self._status.public_url = f"https://rotated-{self.rotate_calls}.trycloudflare.com"
+        self._status.public_url = (
+            f"https://rotated-{self.rotate_calls}.trycloudflare.com"
+        )
         self._status.message = "Cloudflare Quick Tunnel ready."
         return self.status()
 
@@ -188,7 +222,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.owner_token = self.app.config["OWNER_TOKEN"]
 
     def create_library(self):
-        return self.client.post(f"/libraries?owner_token={self.owner_token}", follow_redirects=False)
+        return self.client.post(
+            f"/libraries?owner_token={self.owner_token}", follow_redirects=False
+        )
 
     def tearDown(self) -> None:
         pass
@@ -286,7 +322,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertTrue(payload["track"]["cover_url"])
 
         updated_library = self.app.config["STORE"].get_library(library_id)
-        self.assertEqual(updated_library.tracks[0].musicbrainz_release_id, "release-123")
+        self.assertEqual(
+            updated_library.tracks[0].musicbrainz_release_id, "release-123"
+        )
         self.assertEqual(updated_library.tracks[0].album, "Demo Album")
         self.assertTrue(updated_library.tracks[0].cover_art_name)
 
@@ -348,6 +386,45 @@ class songwalkAppTestCase(unittest.TestCase):
 
         updated_library = self.app.config["STORE"].get_library(library_id)
         self.assertEqual(updated_library.tracks, [])
+
+    def test_bulk_delete_tracks_via_formdata(self) -> None:
+        """Matches the frontend: FormData with repeated track_ids keys (app.js:4094)."""
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-track-f1"), "form-one.mp3"),
+                    (io.BytesIO(b"ID3-track-f2"), "form-two.mp3"),
+                    (io.BytesIO(b"ID3-track-f3"), "form-three.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        track_ids = [t.id for t in library.tracks]
+        self.assertEqual(len(track_ids), 3)
+
+        # Simulate exactly what app.js line 4094-4098 does:
+        # FormData with repeated 'track_ids' keys, fetch POST
+        delete_response = self.client.post(
+            f"/s/{library_id}/tracks/delete",
+            data={"track_ids": track_ids[:2]},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        payload = delete_response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["deleted"], 2)
+
+        updated_library = self.app.config["STORE"].get_library(library_id)
+        self.assertEqual(len(updated_library.tracks), 1)
+        self.assertEqual(updated_library.tracks[0].id, track_ids[2])
 
     def test_delete_library(self) -> None:
         response = self.create_library()
@@ -512,7 +589,7 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertIn(b"First EP", page.data)
         self.assertIn(b"Second EP", page.data)
         self.assertIn(
-            f'/s/{library_id}?view=tracks&amp;album=first+ep::demo+artist'.encode(),
+            f"/s/{library_id}?view=tracks&amp;album=first+ep::demo+artist".encode(),
             page.data,
         )
 
@@ -573,7 +650,10 @@ class songwalkAppTestCase(unittest.TestCase):
 
         self.client.post(
             f"/s/{library_id}/collections",
-            data={"name": "Demo Singles", "track_ids": ",".join(track.id for track in library.tracks)},
+            data={
+                "name": "Demo Singles",
+                "track_ids": ",".join(track.id for track in library.tracks),
+            },
             follow_redirects=False,
         )
 
@@ -582,7 +662,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertIn(b"Group from track selection", page.data)
         self.assertEqual(page.data.count(b"Group from track selection"), 1)
         self.assertIn(b'data-collection-selection-scope="tracks"', page.data)
-        self.assertIn(b"Track selection is collapsed to full albums before grouping", page.data)
+        self.assertIn(
+            b"Track selection is collapsed to full albums before grouping", page.data
+        )
         self.assertIn(b"Demo Singles", page.data)
         self.assertIn(b"data-collection-summary-list", page.data)
         self.assertIn(b"collection-track-label", page.data)
@@ -604,7 +686,9 @@ class songwalkAppTestCase(unittest.TestCase):
             data={"name": "Archive Library"},
             follow_redirects=False,
         )
-        second_library_id = second_response.headers["Location"].split("?", 1)[0].rsplit("/", 1)[-1]
+        second_library_id = (
+            second_response.headers["Location"].split("?", 1)[0].rsplit("/", 1)[-1]
+        )
 
         self.client.post(
             f"{first_library_path}/upload",
@@ -637,7 +721,10 @@ class songwalkAppTestCase(unittest.TestCase):
 
         page = self.client.get(first_library_path)
         self.assertEqual(page.status_code, 200)
-        self.assertIn(f'data-track-move-url="/s/{first_library_id}/tracks/move"'.encode(), page.data)
+        self.assertIn(
+            f'data-track-move-url="/s/{first_library_id}/tracks/move"'.encode(),
+            page.data,
+        )
         self.assertIn(b'draggable="true"', page.data)
         self.assertIn(b"data-drop-album-target", page.data)
         self.assertIn(b'id="context-move-library"', page.data)
@@ -713,7 +800,9 @@ class songwalkAppTestCase(unittest.TestCase):
             data={"name": "Archive Library"},
             follow_redirects=False,
         )
-        target_library_id = target_response.headers["Location"].split("?", 1)[0].rsplit("/", 1)[-1]
+        target_library_id = (
+            target_response.headers["Location"].split("?", 1)[0].rsplit("/", 1)[-1]
+        )
 
         self.client.post(
             f"{source_library_path}/upload",
@@ -741,7 +830,9 @@ class songwalkAppTestCase(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["target_library"]["id"], target_library_id)
-        self.assertIn(f"/s/{target_library_id}".encode(), payload["redirect_url"].encode())
+        self.assertIn(
+            f"/s/{target_library_id}".encode(), payload["redirect_url"].encode()
+        )
 
         updated_source_library = self.app.config["STORE"].get_library(source_library_id)
         self.assertEqual(updated_source_library.tracks, [])
@@ -752,7 +843,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertEqual(moved_track.title, "Moved Song")
         self.assertEqual(moved_track.artist, "Demo Artist")
         self.assertEqual(moved_track.album, "Demo Album")
-        streamed_track, file_path = self.app.config["STORE"].get_track_file(target_library_id, moved_track.id)
+        streamed_track, file_path = self.app.config["STORE"].get_track_file(
+            target_library_id, moved_track.id
+        )
         self.assertEqual(streamed_track.id, moved_track.id)
         self.assertTrue(file_path.exists())
 
@@ -778,7 +871,10 @@ class songwalkAppTestCase(unittest.TestCase):
 
         page = self.client.get(f"/owner/{self.owner_token}")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(f'action="/libraries/{library_id}/rename?owner_token={self.owner_token}"'.encode(), page.data)
+        self.assertIn(
+            f'action="/libraries/{library_id}/rename?owner_token={self.owner_token}"'.encode(),
+            page.data,
+        )
         self.assertIn(b"Rename library", page.data)
 
     def test_download_library_returns_zip_archive(self) -> None:
@@ -817,7 +913,10 @@ class songwalkAppTestCase(unittest.TestCase):
         download_response = self.client.get(f"{library_path}/download")
         self.assertEqual(download_response.status_code, 200)
         self.assertEqual(download_response.mimetype, "application/zip")
-        self.assertIn(f"songwalk-library-{library_id}.zip", download_response.headers["Content-Disposition"])
+        self.assertIn(
+            f"songwalk-library-{library_id}.zip",
+            download_response.headers["Content-Disposition"],
+        )
         self.assertGreater(int(download_response.headers["Content-Length"]), 0)
 
         archive = zipfile.ZipFile(io.BytesIO(download_response.data))
@@ -830,7 +929,8 @@ class songwalkAppTestCase(unittest.TestCase):
         )
         expected_bytes = sorted(
             (
-                self.app.config["STORE"].library_files_dir(library_id) / track.stored_name
+                self.app.config["STORE"].library_files_dir(library_id)
+                / track.stored_name
             ).read_bytes()
             for track in self.app.config["STORE"].get_library(library_id).tracks
         )
@@ -857,7 +957,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertIn(b"data-spotify-search-results", page.data)
         self.assertIn(b"data-remote-import-shell", page.data)
         library_id = library_path.rsplit("/", 1)[-1]
-        self.assertIn(f'data-library-state-url="/s/{library_id}/state"'.encode(), page.data)
+        self.assertIn(
+            f'data-library-state-url="/s/{library_id}/state"'.encode(), page.data
+        )
 
     def test_library_view_renders_live_region_and_shared_state_markers(self) -> None:
         response = self.create_library()
@@ -867,7 +969,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"data-library-live-region", page.data)
         library_id = library_path.rsplit("/", 1)[-1]
-        self.assertIn(f'data-library-state-url="/s/{library_id}/state"'.encode(), page.data)
+        self.assertIn(
+            f'data-library-state-url="/s/{library_id}/state"'.encode(), page.data
+        )
 
     def test_library_view_does_not_expose_other_library_ids(self) -> None:
         first_response = self.create_library()
@@ -979,7 +1083,9 @@ class songwalkAppTestCase(unittest.TestCase):
         client = app.test_client()
         owner_token = app.config["OWNER_TOKEN"]
 
-        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        create_response = client.post(
+            f"/libraries?owner_token={owner_token}", follow_redirects=False
+        )
         library_path = create_response.headers["Location"].split("?", 1)[0]
         library_id = library_path.rsplit("/", 1)[-1]
 
@@ -1022,7 +1128,9 @@ class songwalkAppTestCase(unittest.TestCase):
         client = app.test_client()
         owner_token = app.config["OWNER_TOKEN"]
 
-        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        create_response = client.post(
+            f"/libraries?owner_token={owner_token}", follow_redirects=False
+        )
         library_path = create_response.headers["Location"].split("?", 1)[0]
         library_id = library_path.rsplit("/", 1)[-1]
 
@@ -1061,7 +1169,9 @@ class songwalkAppTestCase(unittest.TestCase):
         client = app.test_client()
         owner_token = app.config["OWNER_TOKEN"]
 
-        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        create_response = client.post(
+            f"/libraries?owner_token={owner_token}", follow_redirects=False
+        )
         library_path = create_response.headers["Location"].split("?", 1)[0]
         library_id = library_path.rsplit("/", 1)[-1]
 
@@ -1097,7 +1207,9 @@ class songwalkAppTestCase(unittest.TestCase):
         client = app.test_client()
         owner_token = app.config["OWNER_TOKEN"]
 
-        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        create_response = client.post(
+            f"/libraries?owner_token={owner_token}", follow_redirects=False
+        )
         library_path = create_response.headers["Location"].split("?", 1)[0]
         library_id = library_path.rsplit("/", 1)[-1]
 
@@ -1108,7 +1220,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["results"][0]["url"], "https://www.youtube.com/watch?v=demo123")
+        self.assertEqual(
+            payload["results"][0]["url"], "https://www.youtube.com/watch?v=demo123"
+        )
 
     def test_spotify_search_endpoint_returns_results(self) -> None:
         temp_dir = new_test_dir()
@@ -1124,7 +1238,9 @@ class songwalkAppTestCase(unittest.TestCase):
         client = app.test_client()
         owner_token = app.config["OWNER_TOKEN"]
 
-        create_response = client.post(f"/libraries?owner_token={owner_token}", follow_redirects=False)
+        create_response = client.post(
+            f"/libraries?owner_token={owner_token}", follow_redirects=False
+        )
         library_path = create_response.headers["Location"].split("?", 1)[0]
         library_id = library_path.rsplit("/", 1)[-1]
 
@@ -1135,7 +1251,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["results"][0]["url"], "https://open.spotify.com/track/demo123")
+        self.assertEqual(
+            payload["results"][0]["url"], "https://open.spotify.com/track/demo123"
+        )
 
     def test_owner_dashboard_uses_forwarded_https_headers_for_share_links(self) -> None:
         app = create_app(
@@ -1182,6 +1300,64 @@ class songwalkAppTestCase(unittest.TestCase):
         response = self.client.post("/libraries", follow_redirects=False)
         self.assertEqual(response.status_code, 404)
 
+    def test_delete_album_removes_all_tracks_in_album(self) -> None:
+        response = self.create_library()
+        library_path = response.headers["Location"].split("?", 1)[0]
+
+        self.client.post(
+            f"{library_path}/upload",
+            data={
+                "tracks": [
+                    (io.BytesIO(b"ID3-track-a1"), "album-a-1.mp3"),
+                    (io.BytesIO(b"ID3-track-a2"), "album-a-2.mp3"),
+                    (io.BytesIO(b"ID3-track-b1"), "album-b-1.mp3"),
+                ]
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        library_id = library_path.rsplit("/", 1)[-1]
+        library = self.app.config["STORE"].get_library(library_id)
+        self.assertEqual(len(library.tracks), 3)
+
+        # Set album metadata: 2 tracks in "First EP", 1 in "Second EP"
+        track_ids = [t.id for t in library.tracks]
+        self.client.post(
+            f"/s/{library_id}/tracks/{track_ids[0]}",
+            data={"title": "Track A1", "artist": "Demo Artist", "album": "First EP"},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.client.post(
+            f"/s/{library_id}/tracks/{track_ids[1]}",
+            data={"title": "Track A2", "artist": "Demo Artist", "album": "First EP"},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+        self.client.post(
+            f"/s/{library_id}/tracks/{track_ids[2]}",
+            data={"title": "Track B1", "artist": "Demo Artist", "album": "Second EP"},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        # Delete "First EP" album
+        album_key = "first ep::demo artist"
+        delete_response = self.client.post(
+            f"/s/{library_id}/albums/delete",
+            json={"album_key": album_key},
+            headers={"Accept": "application/json", "X-Requested-With": "fetch"},
+        )
+
+        self.assertEqual(delete_response.status_code, 200)
+        payload = delete_response.get_json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["deleted"], 2)
+
+        # Verify: only "Second EP" track remains
+        updated_library = self.app.config["STORE"].get_library(library_id)
+        self.assertEqual(len(updated_library.tracks), 1)
+        self.assertEqual(updated_library.tracks[0].album, "Second EP")
+        self.assertEqual(updated_library.tracks[0].title, "Track B1")
+
     def test_quick_tunnel_status_requires_direct_local_access(self) -> None:
         response = self.client.get("/quick-tunnel", base_url="http://music.example.com")
         self.assertEqual(response.status_code, 404)
@@ -1194,7 +1370,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["tunnel"]["public_url"], "https://demo.trycloudflare.com")
+        self.assertEqual(
+            payload["tunnel"]["public_url"], "https://demo.trycloudflare.com"
+        )
         self.assertEqual(
             payload["tunnel"]["public_owner_url"],
             f"https://demo.trycloudflare.com{self.app.config['OWNER_PATH']}",
@@ -1209,7 +1387,9 @@ class songwalkAppTestCase(unittest.TestCase):
         payload = response.get_json()
         self.assertTrue(payload["ok"])
         self.assertEqual(manager.rotate_calls, 1)
-        self.assertEqual(payload["tunnel"]["public_url"], "https://rotated-1.trycloudflare.com")
+        self.assertEqual(
+            payload["tunnel"]["public_url"], "https://rotated-1.trycloudflare.com"
+        )
 
     def test_quick_tunnel_toggle_stops_running_tunnel(self) -> None:
         manager = FakeQuickTunnelManager()
@@ -1236,7 +1416,9 @@ class songwalkAppTestCase(unittest.TestCase):
         self.assertEqual(payload["action"], "started")
         self.assertEqual(manager.start_calls, 1)
         self.assertTrue(payload["tunnel"]["running"])
-        self.assertEqual(payload["tunnel"]["public_url"], "https://started-1.trycloudflare.com")
+        self.assertEqual(
+            payload["tunnel"]["public_url"], "https://started-1.trycloudflare.com"
+        )
 
 
 if __name__ == "__main__":

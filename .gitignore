@@ -11,3 +11,8 @@ build/pyinstaller/dist/
 build/pyinstaller-live*/
 build/pyinstaller/vendor/cloudflared-windows-amd64.exe
 /*-*-*-*-*/
+*.whl
+magic-link-secret.txt
+owner-token.txt
+songwalk-data/
+.import-work/

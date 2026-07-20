@@ -2,6 +2,17 @@ services:
   songwalk:
     container_name: songwalk
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2"
     environment:
       SONGWALK_BASE_URL: https://songwalk.tekonline.com.au
       SONGWALK_QUICK_TUNNEL_ENABLED: "0"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import threading
@@ -78,10 +79,49 @@ class ImportJob:
 
 
 class ImportJobStore:
-    def __init__(self, *, ttl_seconds: float = 3600):
+    def __init__(self, *, ttl_seconds: float = 3600, data_dir: str | None = None):
         self._ttl_seconds = ttl_seconds
         self._jobs: dict[str, ImportJob] = {}
         self._lock = threading.Lock()
+        self._data_dir = Path(data_dir) if data_dir else None
+
+    def _job_path(self, job_id: str) -> Path | None:
+        if not self._data_dir:
+            return None
+        jobs_dir = self._data_dir / ".import-jobs"
+        jobs_dir.mkdir(parents=True, exist_ok=True)
+        return jobs_dir / f"{job_id}.json"
+
+    def _persist(self, job: ImportJob) -> None:
+        path = self._job_path(job.id)
+        if path:
+            try:
+                path.write_text(json.dumps(job.to_dict()), encoding="utf-8")
+            except OSError:
+                pass
+
+    def _load_from_disk(self, job_id: str) -> ImportJob | None:
+        path = self._job_path(job_id)
+        if not path or not path.is_file():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return ImportJob(
+                id=payload["id"],
+                library_id=payload["library_id"],
+                source=payload.get("source", ""),
+                status=payload.get("status", ""),
+                message=payload.get("message", ""),
+                percent=payload.get("percent"),
+                current_item=payload.get("current_item", ""),
+                complete=payload.get("complete", False),
+                ok=payload.get("ok", False),
+                error=payload.get("error", ""),
+                redirect_url=payload.get("redirect_url", ""),
+                updated_at=payload.get("updated_at", 0),
+            )
+        except (json.JSONDecodeError, KeyError, OSError):
+            return None
 
     def create(self, *, library_id: str, source: str, message: str) -> ImportJob:
         with self._lock:
@@ -94,6 +134,7 @@ class ImportJobStore:
                 updated_at=time.time(),
             )
             self._jobs[job.id] = job
+            self._persist(job)
             return job
 
     def update(self, job_id: str, **changes) -> ImportJob | None:
@@ -104,6 +145,7 @@ class ImportJobStore:
             for key, value in changes.items():
                 setattr(job, key, value)
             job.updated_at = time.time()
+            self._persist(job)
             return job
 
     def finish(
@@ -129,7 +171,16 @@ class ImportJobStore:
     def get(self, job_id: str) -> ImportJob | None:
         with self._lock:
             self._prune_locked()
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+            if job:
+                return job
+        # Fall back to disk (survives process restart)
+        disk_job = self._load_from_disk(job_id)
+        if disk_job:
+            with self._lock:
+                self._jobs[job_id] = disk_job
+            return disk_job
+        return None
 
     def latest_for_library(self, library_id: str) -> ImportJob | None:
         with self._lock:
@@ -192,7 +243,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     store = Store(Path(app.config["DATA_DIR"]))
     app.config["STORE"] = store
     app.config.setdefault("LOOKUP_CLIENT", MusicMetadataClient())
-    app.config.setdefault("IMPORT_JOB_STORE", ImportJobStore())
+    app.config.setdefault("IMPORT_JOB_STORE", ImportJobStore(data_dir=str(data_dir)))
     app.config.setdefault(
         "IMPORT_SERVICE",
         LibraryImportService(
@@ -1714,14 +1765,16 @@ def create_app(test_config: dict | None = None) -> Flask:
     # ------------------------------------------------------------------
     # Cookie token state (in-memory — resets on restart, acceptable for sync flow)
     # ------------------------------------------------------------------
+    _cookie_token_lock = threading.Lock()
     _cookie_upload_tokens: dict[str, float] = {}
 
     def _prune_expired_cookie_tokens(now: float | None = None) -> None:
         if now is None:
             now = time.time()
-        expired = [t for t, exp in _cookie_upload_tokens.items() if now >= exp]
-        for t in expired:
-            _cookie_upload_tokens.pop(t, None)
+        with _cookie_token_lock:
+            expired = [t for t, exp in _cookie_upload_tokens.items() if now >= exp]
+            for t in expired:
+                _cookie_upload_tokens.pop(t, None)
 
     # ------------------------------------------------------------------
     # Cookie upload endpoints
@@ -1779,7 +1832,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         require_owner_access()
         _prune_expired_cookie_tokens()
         token = secrets.token_urlsafe(24)
-        _cookie_upload_tokens[token] = time.time() + 600  # 10 min expiry
+        with _cookie_token_lock:
+            _cookie_upload_tokens[token] = time.time() + 600  # 10 min expiry
         return jsonify(
             {
                 "ok": True,
@@ -1796,7 +1850,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         Consumes the token — one-time use only.
         """
         _prune_expired_cookie_tokens()
-        expires_at = _cookie_upload_tokens.get(token)
+        with _cookie_token_lock:
+            expires_at = _cookie_upload_tokens.get(token)
         if expires_at is None or time.time() >= expires_at:
             return jsonify({"ok": False, "error": "Invalid or expired token."}), 401
 
@@ -1817,7 +1872,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         cookies_path.write_text(raw, encoding="utf-8")
 
         # Consume the token
-        _cookie_upload_tokens.pop(token, None)
+        with _cookie_token_lock:
+            _cookie_upload_tokens.pop(token, None)
 
         return jsonify(
             {
@@ -1831,7 +1887,8 @@ def create_app(test_config: dict | None = None) -> Flask:
         """Serve the cookie sync Python script with SongWalk URL pre-filled."""
         require_owner_access()
         token = secrets.token_urlsafe(24)
-        _cookie_upload_tokens[token] = time.time() + 600
+        with _cookie_token_lock:
+            _cookie_upload_tokens[token] = time.time() + 600
         base_url = (request.host_url + owner_path()).rstrip("/")
 
         script_path = Path(__file__).resolve().parent.parent / "sync_youtube_cookies.py"

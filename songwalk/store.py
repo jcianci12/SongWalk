@@ -23,6 +23,7 @@ ALLOWED_AUDIO_EXTENSIONS = {
     ".flac",
     ".m4a",
     ".mp3",
+    ".mp4",
     ".ogg",
     ".opus",
     ".wav",

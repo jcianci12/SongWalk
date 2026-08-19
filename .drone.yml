@@ -2,11 +2,12 @@ kind: pipeline
 type: docker
 name: deploy
 
-# ubuntuserver Drone runner (x86_64) — deploys SongWalk on-prem where YouTube
-# is not IP-blocked. Oracle IPs blocked by YouTube bot detection (2026-08).
+# Pipeline runs on Oracle Cloud ARM64 runner (ci.jobsight.tekonline.com.au).
+# Deploy target: ubuntuserver 100.89.58.49 via SSH. SongWalk must run on a
+# residential IP — Oracle IPs are blocked by YouTube bot detection (2026-08).
 platform:
   os: linux
-  arch: amd64
+  arch: arm64
 
 concurrency:
   limit: 1
@@ -20,26 +21,17 @@ trigger:
 
 steps:
   - name: deploy
-    image: docker:dind
-    volumes:
-      - name: docker-socket
-        path: /var/run/docker.sock
+    image: alpine:3.20
     commands:
-      - echo "Deploying SongWalk..."
-      - docker compose version
-      - docker compose -p songwalk -f compose.yaml -f compose.prod.yaml down --timeout 30 --remove-orphans || true
-      - docker compose -p songwalk -f compose.yaml -f compose.prod.yaml up -d --build --force-recreate
-      - docker compose -p songwalk ps
-      - echo "Connecting NPM to songwalk network..."
-      - docker network connect SONGWALK_default nginx-app-1 2>/dev/null || echo "(already connected)"
+      - apk add --no-cache openssh-client tar >/dev/null 2>&1
+      - mkdir -p ~/.ssh && echo "$SONGWALK_SSH_KEY" > ~/.ssh/id_songwalk && chmod 600 ~/.ssh/id_songwalk
+      - tar cz songwalk requirements.txt Dockerfile compose.yaml compose.prod.yaml .dockerignore | ssh -i ~/.ssh/id_songwalk -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jon@100.89.58.49 'mkdir -p /home/jon/songwalk/app && rm -rf /home/jon/songwalk/app/* && tar xzf - -C /home/jon/songwalk/app'
+      - ssh -i ~/.ssh/id_songwalk -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jon@100.89.58.49 "set -e; cd /home/jon/songwalk/app; SONGWALK_PUBLISHED_PORT='$SONGWALK_PUBLISHED_PORT' SONGWALK_SMTP_USERNAME='$SONGWALK_SMTP_USERNAME' SONGWALK_SMTP_PASSWORD='$SONGWALK_SMTP_PASSWORD' SONGWALK_SMTP_FROM='$SONGWALK_SMTP_FROM' docker compose -p songwalk -f compose.yaml -f compose.prod.yaml up -d --build --force-recreate; docker compose -p songwalk ps"
     environment:
       SONGWALK_PUBLISHED_PORT: "100.89.58.49:18080"
       SONGWALK_SMTP_USERNAME: "noreply@tekonline.com.au"
       SONGWALK_SMTP_PASSWORD:
         from_secret: songwalk_smtp_password
       SONGWALK_SMTP_FROM: "noreply@tekonline.com.au"
-
-volumes:
-  - name: docker-socket
-    host:
-      path: /var/run/docker.sock
+      SONGWALK_SSH_KEY:
+        from_secret: songwalk_ssh_key

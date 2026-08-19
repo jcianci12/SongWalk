@@ -26,7 +26,7 @@ steps:
       - apk add --no-cache openssh-client tar >/dev/null 2>&1
       - mkdir -p ~/.ssh && echo "$SONGWALK_SSH_KEY" > ~/.ssh/id_songwalk && chmod 600 ~/.ssh/id_songwalk
       - tar cz songwalk requirements.txt Dockerfile compose.yaml compose.prod.yaml .dockerignore | ssh -i ~/.ssh/id_songwalk -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jon@100.89.58.49 'mkdir -p /home/jon/songwalk/app && rm -rf /home/jon/songwalk/app/* && tar xzf - -C /home/jon/songwalk/app'
-      - ssh -i ~/.ssh/id_songwalk -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jon@100.89.58.49 "set -e; cd /home/jon/songwalk/app; SONGWALK_PUBLISHED_PORT='$SONGWALK_PUBLISHED_PORT' SONGWALK_SMTP_USERNAME='$SONGWALK_SMTP_USERNAME' SONGWALK_SMTP_PASSWORD='$SONGWALK_SMTP_PASSWORD' SONGWALK_SMTP_FROM='$SONGWALK_SMTP_FROM' docker compose -p songwalk -f compose.yaml -f compose.prod.yaml up -d --build --force-recreate; docker compose -p songwalk ps"
+      - ssh -i ~/.ssh/id_songwalk -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jon@100.89.58.49 "set -e; cd /home/jon/songwalk/app; SONGWALK_PUBLISHED_PORT='$SONGWALK_PUBLISHED_PORT' SONGWALK_SMTP_USERNAME='$SONGWALK_SMTP_USERNAME' SONGWALK_SMTP_PASSWORD='$SONGWALK_SMTP_PASSWORD' SONGWALK_SMTP_FROM='$SONGWALK_SMTP_FROM' docker compose -p songwalk -f compose.yaml -f compose.prod.yaml up -d --build --force-recreate --remove-orphans; docker compose -p songwalk ps"
     environment:
       SONGWALK_PUBLISHED_PORT: "100.89.58.49:18080"
       SONGWALK_SMTP_USERNAME: "noreply@tekonline.com.au"

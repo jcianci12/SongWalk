@@ -2,10 +2,11 @@ kind: pipeline
 type: docker
 name: deploy
 
-# Oracle Cloud ARM64 runner — matches ubuntuserver drone configuration.
+# ubuntuserver Drone runner (x86_64) — deploys SongWalk on-prem where YouTube
+# is not IP-blocked. Oracle IPs blocked by YouTube bot detection (2026-08).
 platform:
   os: linux
-  arch: arm64
+  arch: amd64
 
 concurrency:
   limit: 1
@@ -32,10 +33,10 @@ steps:
       - echo "Connecting NPM to songwalk network..."
       - docker network connect SONGWALK_default nginx-app-1 2>/dev/null || echo "(already connected)"
     environment:
-      SONGWALK_PUBLISHED_PORT: "18080"
+      SONGWALK_PUBLISHED_PORT: "100.89.58.49:18080"
       SONGWALK_SMTP_USERNAME: "noreply@tekonline.com.au"
       SONGWALK_SMTP_PASSWORD:
-        from_secret: SONGWALK_smtp_password
+        from_secret: songwalk_smtp_password
       SONGWALK_SMTP_FROM: "noreply@tekonline.com.au"
 
 volumes:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import os
 import re
 import signal
@@ -14,6 +15,8 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import urlopen
+
+logger = logging.getLogger(__name__)
 
 
 TRYCLOUDFLARE_URL_RE = re.compile(r"https://[-a-z0-9]+\.trycloudflare\.com")
@@ -116,7 +119,13 @@ class QuickTunnelManager:
                 )
 
                 process = subprocess.Popen(
-                    [binary_path, "tunnel", "--no-autoupdate", "--url", self._service_url],
+                    [
+                        binary_path,
+                        "tunnel",
+                        "--no-autoupdate",
+                        "--url",
+                        self._service_url,
+                    ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
@@ -172,7 +181,9 @@ class QuickTunnelManager:
             self._set_status_locked(
                 running=False,
                 public_url="",
-                message="Quick Tunnel stopped." if clear_message else "Restarting Cloudflare Quick Tunnel...",
+                message="Quick Tunnel stopped."
+                if clear_message
+                else "Restarting Cloudflare Quick Tunnel...",
                 last_error="",
                 pid=0,
             )
@@ -201,18 +212,21 @@ class QuickTunnelManager:
                                     pid=process.pid,
                                 )
                                 self._ready_event.set()
-                        print(f"SongWalk public URL: {public_url}", flush=True)
+                        logger.info("SongWalk public URL: %s", public_url)
         finally:
             exit_code = process.wait()
             with self._lock:
                 if self._process is process:
                     self._process = None
                     self._set_status_locked(
-                        available=self._enabled and shutil.which(self._binary_name) is not None,
+                        available=self._enabled
+                        and shutil.which(self._binary_name) is not None,
                         running=False,
                         public_url="",
                         message="Cloudflare Quick Tunnel exited.",
-                        last_error="" if exit_code == 0 else f"cloudflared exited with code {exit_code}.",
+                        last_error=""
+                        if exit_code == 0
+                        else f"cloudflared exited with code {exit_code}.",
                         pid=0,
                     )
                     self._ready_event.set()

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import logging
+import threading
 import time
 from collections import defaultdict
 
 from flask import request
 from flask_socketio import SocketIO, emit, join_room, leave_room, rooms
 
+logger = logging.getLogger(__name__)
+
 socketio = SocketIO(async_mode="threading")
+
+# All room state guarded by _sync_lock — concurrent socket events in threading mode.
+_sync_lock = threading.Lock()
 
 # Track peers per sync room: { "sync:<library_id>": {sid, sid, ...} }
 _room_peers: dict[str, set[str]] = defaultdict(set)
@@ -16,8 +23,6 @@ _room_sync_state: dict[str, dict] = {}
 
 # Monotonically increasing version per room — clients ignore stale states
 _room_version: dict[str, int] = defaultdict(int)
-
-# Remove unused anchor tracking — server is the single authority
 
 
 def _room_for(library_id: str) -> str:
@@ -51,13 +56,14 @@ def init_sync(app):
         room = _room_for(library_id)
         join_room(room)
         sid = request.sid
-        _room_peers[room].add(sid)
-
+        with _sync_lock:
+            _room_peers[room].add(sid)
+            peer_count = len(_room_peers[room])
+            peers = _peers_in_room(room)
         # Tell everyone (including the joiner) about the new peer
-        peer_count = len(_room_peers[room])
         emit(
             "peer_joined",
-            {"peer_id": sid, "peer_count": peer_count, "peers": _peers_in_room(room)},
+            {"peer_id": sid, "peer_count": peer_count, "peers": peers},
             to=room,
         )
         # Send direct reply to joiner with server time + current playback state
@@ -80,13 +86,15 @@ def init_sync(app):
         room = _room_for(library_id)
         leave_room(room)
         sid = request.sid
-        _room_peers[room].discard(sid)
-        if not _room_peers[room]:
-            del _room_peers[room]
-        peer_count = len(_room_peers.get(room, set()))
+        with _sync_lock:
+            _room_peers[room].discard(sid)
+            if not _room_peers[room]:
+                del _room_peers[room]
+            peer_count = len(_room_peers.get(room, set()))
+            peers = _peers_in_room(room)
         emit(
             "peer_left",
-            {"peer_id": sid, "peer_count": peer_count, "peers": _peers_in_room(room)},
+            {"peer_id": sid, "peer_count": peer_count, "peers": peers},
             to=room,
         )
 
@@ -105,8 +113,9 @@ def init_sync(app):
         if not isinstance(pos, (int, float)) or not (-1 < pos < 86400):
             pos = 0
 
-        # Increment room version
-        _room_version[room] += 1
+        # Increment room version (guarded)
+        with _sync_lock:
+            _room_version[room] += 1
 
         state = {
             "action": action,
@@ -118,7 +127,8 @@ def init_sync(app):
             "version": _room_version[room],
         }
 
-        _room_sync_state[room] = state
+        with _sync_lock:
+            _room_sync_state[room] = state
         state["execute_at"] = state["server_time"] + 0.15
         emit("sync_action", state, to=room, include_self=False)
 
@@ -142,17 +152,19 @@ def init_sync(app):
         for room_name in list(rooms()):
             if room_name.startswith("sync:"):
                 leave_room(room_name)
-                _room_peers[room_name].discard(sid)
-                if not _room_peers[room_name]:
-                    del _room_peers[room_name]
-                    _room_sync_state.pop(room_name, None)
-                peer_count = len(_room_peers.get(room_name, set()))
+                with _sync_lock:
+                    _room_peers[room_name].discard(sid)
+                    if not _room_peers[room_name]:
+                        del _room_peers[room_name]
+                        _room_sync_state.pop(room_name, None)
+                    peer_count = len(_room_peers.get(room_name, set()))
+                    peers = _peers_in_room(room_name)
                 emit(
                     "peer_left",
                     {
                         "peer_id": sid,
                         "peer_count": peer_count,
-                        "peers": _peers_in_room(room_name),
+                        "peers": peers,
                     },
                     to=room_name,
                 )
@@ -179,4 +191,6 @@ def broadcast_library_change(
     except (RuntimeError, AttributeError):
         # RuntimeError: called outside SocketIO request context (server not running).
         # AttributeError: socketio.server is None (app not initialised, e.g. during tests).
-        pass
+        logger.warning(
+            "broadcast_library_change failed for library %s", library_id, exc_info=True
+        )

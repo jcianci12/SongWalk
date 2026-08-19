@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from mutagen.id3 import ID3, ID3NoHeaderError, POPM, TALB, TIT2, TPE1
+from mutagen.id3 import (
+    ID3,
+    ID3NoHeaderError,
+    ID3UnsupportedVersionError,
+    POPM,
+    TALB,
+    TIT2,
+    TPE1,
+)
+
+logger = logging.getLogger(__name__)
 
 
 WMP_POPM_EMAIL = "Windows Media Player 9 Series"
@@ -24,7 +35,8 @@ def read_mp3_metadata(file_path: Path) -> dict[str, int | str]:
         tags = ID3(file_path)
     except ID3NoHeaderError:
         return {}
-    except Exception:
+    except (OSError, ValueError, ID3UnsupportedVersionError) as exc:
+        logger.debug("Cannot read ID3 tags from %s: %s", file_path, exc)
         return {}
 
     return {
@@ -35,13 +47,15 @@ def read_mp3_metadata(file_path: Path) -> dict[str, int | str]:
     }
 
 
-def write_mp3_metadata(file_path: Path, *, title: str, artist: str, album: str, rating: int) -> None:
+def write_mp3_metadata(
+    file_path: Path, *, title: str, artist: str, album: str, rating: int
+) -> None:
     if Path(file_path).suffix.lower() != ".mp3":
         return
 
     try:
         tags = ID3(file_path)
-    except Exception:
+    except (OSError, ValueError, ID3NoHeaderError, ID3UnsupportedVersionError):
         tags = ID3()
 
     _set_text_frame(tags, "TIT2", TIT2, title)
@@ -50,11 +64,14 @@ def write_mp3_metadata(file_path: Path, *, title: str, artist: str, album: str, 
     _set_rating(tags, rating)
     try:
         tags.save(file_path, v2_version=3)
-    except Exception:
+    except (OSError, ValueError, ID3UnsupportedVersionError):
         _strip_broken_id3_header(file_path)
         try:
             tags.save(file_path, v2_version=3)
-        except Exception:
+        except (OSError, ValueError, ID3UnsupportedVersionError):
+            logger.warning(
+                "Cannot write ID3 tags to %s after header recovery", file_path
+            )
             return
 
 
@@ -86,15 +103,28 @@ def _read_rating(tags: ID3) -> int:
     if not popm_frames:
         return 0
 
-    preferred = next((frame for frame in popm_frames if getattr(frame, "email", "") == WMP_POPM_EMAIL), popm_frames[0])
+    preferred = next(
+        (
+            frame
+            for frame in popm_frames
+            if getattr(frame, "email", "") == WMP_POPM_EMAIL
+        ),
+        popm_frames[0],
+    )
     return _stars_from_popm_value(int(getattr(preferred, "rating", 0) or 0))
 
 
 def _set_rating(tags: ID3, rating: int) -> None:
-    remaining_frames = [frame for frame in tags.getall("POPM") if getattr(frame, "email", "") != WMP_POPM_EMAIL]
+    remaining_frames = [
+        frame
+        for frame in tags.getall("POPM")
+        if getattr(frame, "email", "") != WMP_POPM_EMAIL
+    ]
     stars = clamp_rating(rating)
     if stars:
-        remaining_frames.append(POPM(email=WMP_POPM_EMAIL, rating=STAR_TO_POPM[stars], count=0))
+        remaining_frames.append(
+            POPM(email=WMP_POPM_EMAIL, rating=STAR_TO_POPM[stars], count=0)
+        )
     tags.setall("POPM", remaining_frames)
 
 

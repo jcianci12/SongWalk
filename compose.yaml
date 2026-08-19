@@ -13,4 +13,4 @@ services:
       SONGWALK_SPOTIFY_CLIENT_ID: ${SONGWALK_SPOTIFY_CLIENT_ID:-}
       SONGWALK_SPOTIFY_CLIENT_SECRET: ${SONGWALK_SPOTIFY_CLIENT_SECRET:-}
     volumes:
-      - ./songwalk-data:/data
+      - songwalk-data:/data

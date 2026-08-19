@@ -14,14 +14,11 @@ services:
           memory: 2G
           cpus: "2"
     environment:
-      SONGWALK_BASE_URL: https://songwalk.tekonline.com.au
       SONGWALK_QUICK_TUNNEL_ENABLED: "0"
       SONGWALK_PROXY_HOPS: "1"
       SONGWALK_SMTP_USERNAME: ${SONGWALK_SMTP_USERNAME:-}
       SONGWALK_SMTP_PASSWORD: ${SONGWALK_SMTP_PASSWORD:-}
       SONGWALK_SMTP_FROM: ${SONGWALK_SMTP_FROM:-jon@tekonline.com.au}
-    volumes:
-      - songwalk-data:/data
 
 volumes:
   songwalk-data:

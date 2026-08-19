@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from flask import Flask
 
 from . import create_app
 from .quick_tunnel import QuickTunnelManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -92,8 +95,8 @@ def write_owner_url_file(*, app: Flask, local_owner_url: str) -> Path:
 
 
 def print_runtime_details(runtime: PreparedRuntime) -> None:
-    print(f"SongWalk owner dashboard: {runtime.local_owner_url}", flush=True)
-    print(f"SongWalk owner URL file: {runtime.owner_url_path}", flush=True)
+    logger.info("SongWalk owner dashboard: %s", runtime.local_owner_url)
+    logger.info("SongWalk owner URL file: %s", runtime.owner_url_path)
 
 
 def watch_files() -> list[str]:

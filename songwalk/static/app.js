@@ -1,7 +1,7 @@
 (function () {
   // Increment this whenever we need to confirm a fresh JS build is running in the browser.
   const SCRIPT_VERSION = "2026-04-22-album-drag-drop-1";
-  const DEBUG_FILTERING = true;
+  const DEBUG_FILTERING = location.hostname === "localhost" || location.hostname === "127.0.0.1";
 
   function debugLog(scope, ...details) {
     if (!DEBUG_FILTERING || !window.console || typeof window.console.log !== "function") {

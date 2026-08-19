@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import os
 import socket
+import sys
 import threading
 import time
 import tkinter as tk
@@ -94,7 +95,7 @@ class SongWalkDesktopApp:
 
         try:
             self.window.iconbitmap(default=self._tray_ico_path())
-        except Exception:
+        except tk.TclError:
             pass
 
         style = ttk.Style(self.window)
@@ -333,6 +334,8 @@ def wait_for_owner_dashboard_url(
 
 
 def show_startup_error(message: str) -> None:
+    if sys.platform != "win32":
+        return
     try:
         ctypes.windll.user32.MessageBoxW(
             None,
@@ -340,7 +343,7 @@ def show_startup_error(message: str) -> None:
             "SongWalk startup error",
             0x10,
         )
-    except Exception:
+    except (OSError, AttributeError):
         pass
 
 

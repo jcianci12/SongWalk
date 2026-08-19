@@ -1,7 +1,10 @@
+import logging
 import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+
+logger = logging.getLogger(__name__)
 
 SMTP_HOST = os.getenv("SONGWALK_SMTP_HOST", "smtp.purelymail.com")
 SMTP_PORT = int(os.getenv("SONGWALK_SMTP_PORT", "465"))
@@ -52,5 +55,6 @@ This link expires in 24 hours.
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
             server.send_message(message)
         return True
-    except Exception:
+    except (smtplib.SMTPException, OSError) as exc:
+        logger.warning("Failed to send magic link email to %s: %s", email, exc)
         return False

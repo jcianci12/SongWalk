@@ -16,3 +16,6 @@ magic-link-secret.txt
 owner-token.txt
 songwalk-data/
 .import-work/
+dist/
+build/songwalk-helper/
+songwalk-data.local-backup/
